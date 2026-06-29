@@ -69,17 +69,11 @@ async def generate_report(
     if not findings:
         raise HTTPException(status_code=404, detail="No findings ingested yet")
 
-    scoped_framework_findings = _framework_filtered_findings(list(findings), body.framework)
-    if not scoped_framework_findings:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No framework-mapped findings for framework={body.framework} in selected scope",
-        )
-
     framework = body.framework if body.framework != "executive" else "nist_csf"
-    gaps = await compute_and_store_gaps(scoped_framework_findings, framework, db)
+    framework_mapped_findings = _framework_filtered_findings(list(findings), body.framework)
+    gaps = await compute_and_store_gaps(framework_mapped_findings, framework, db)
 
-    path = await build_report(scoped_framework_findings, gaps, framework, db)
+    path = await build_report(list(findings), gaps, framework, db)
 
     report = Report(report_type=body.framework, path=path)
     db.add(report)

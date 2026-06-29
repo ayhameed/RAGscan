@@ -61,6 +61,18 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[str]
     intent: str
+    session_id: Optional[uuid.UUID] = None
+
+
+class SessionMessage(BaseModel):
+    role: str
+    text: str
+    ts: datetime
+
+
+class SessionHistoryResponse(BaseModel):
+    session_id: uuid.UUID
+    history: list[SessionMessage]
 
 
 class ReportRequest(BaseModel):

@@ -5,6 +5,8 @@ All answers are strictly anchored to retrieved findings.
 The LLM is instructed to cite finding IDs and CVEs in every response.
 Temperature = 0.1 for deterministic, auditable outputs.
 """
+import re
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -19,6 +21,8 @@ Rules you must follow:
 3. If the answer is not contained in the provided findings, say exactly: "This information is not in the retrieved findings."
 4. Do not speculate, guess, or add context not present in the findings.
 5. Prioritise findings with higher risk scores and CISA KEV status.
+6. Do not use emojis, markdown headings, bullet lists, tables, or code fences.
+7. Write plain text only, using short paragraphs.
 
 Respond in clear, structured paragraphs. Be specific and concise."""
 
@@ -28,6 +32,16 @@ prompt = ChatPromptTemplate.from_messages([
 ])
 
 _chain = None
+
+
+def _clean_answer(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = cleaned.replace("**", "").replace("__", "").replace("`", "")
+    cleaned = re.sub(r"^\s*[-*+]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
 
 
 def _get_chain():
@@ -63,4 +77,5 @@ def format_findings(findings: list[dict]) -> str:
 
 async def query(question: str, findings: list[dict]) -> str:
     context = format_findings(findings)
-    return await _get_chain().ainvoke({"context": context, "question": question})
+    response = await _get_chain().ainvoke({"context": context, "question": question})
+    return _clean_answer(response)

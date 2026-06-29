@@ -58,6 +58,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string>("");
+  const [exporting, setExporting] = useState(false);
   const [reports, setReports] = useState<UploadReport[]>([]);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -78,6 +80,25 @@ export default function ChatPage() {
       : (single ? [single] : []);
     setHandoffReportIds(parsed);
     setHandoffPrompt(params.get("prompt") ?? "");
+  }, []);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("ragscan_chat_session_id") ?? "";
+    if (!saved) return;
+    setSessionId(saved);
+    api.chatSessionHistory(saved)
+      .then((res) => {
+        setMessages(
+          res.history.map((item) => ({
+            role: item.role === "user" ? "user" : "assistant",
+            text: item.text,
+          }))
+        );
+      })
+      .catch(() => {
+        window.localStorage.removeItem("ragscan_chat_session_id");
+        setSessionId("");
+      });
   }, []);
 
   useEffect(() => {
@@ -119,7 +140,12 @@ export default function ChatPage() {
         question.trim(),
         selectedReportIds,
         selectedFindingIds,
+        sessionId || undefined,
       );
+      if (res.session_id && res.session_id !== sessionId) {
+        setSessionId(res.session_id);
+        window.localStorage.setItem("ragscan_chat_session_id", res.session_id);
+      }
       const assistantMsg: Message = {
         role: "assistant",
         text: res.answer,
@@ -152,6 +178,25 @@ export default function ChatPage() {
     );
   }
 
+  async function exportConversationPdf() {
+    if (!sessionId) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: "No saved session yet. Send a message first, then export the conversation." },
+      ]);
+      return;
+    }
+    setExporting(true);
+    try {
+      await api.downloadChatSession(sessionId);
+    } catch (err: unknown) {
+      const text = err instanceof Error ? err.message : "Export failed";
+      setMessages((prev) => [...prev, { role: "assistant", text: `Error: ${text}` }]);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <AuthGuard>
       <Nav />
@@ -175,13 +220,23 @@ export default function ChatPage() {
                 {reports.length === 0 && <p className="text-white/60 text-xs">No uploaded files.</p>}
               </div>
             </div>
-            <span className="text-xs text-white/70">
-              {selectedFindingIds.length > 0
-                ? `${selectedFindingIds.length} individual findings selected`
-                : selectedReportIds.length > 0
-                ? `Semantic retrieval over ${selectedReportIds.length} selected file(s)`
-                : "No file selected: querying across all uploaded findings"}
-            </span>
+            <div className="text-xs text-white/70 flex flex-col items-end gap-2">
+              <span>
+                {selectedFindingIds.length > 0
+                  ? `${selectedFindingIds.length} individual findings selected`
+                  : selectedReportIds.length > 0
+                  ? `Semantic retrieval over ${selectedReportIds.length} selected file(s)`
+                  : "No file selected: querying across all uploaded findings"}
+              </span>
+              <button
+                type="button"
+                onClick={exportConversationPdf}
+                disabled={exporting || messages.length === 0}
+                className="px-3 py-1.5 rounded-lg border border-white/25 text-white hover:bg-white/10 disabled:opacity-40"
+              >
+                {exporting ? "Exporting PDF..." : "Export Conversation PDF"}
+              </button>
+            </div>
           </div>
           <p className="mt-2 text-xs text-white/60">
             Tip: choose one or more uploaded files above, then optionally choose specific findings below.

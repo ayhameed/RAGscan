@@ -152,7 +152,7 @@ export default function DashboardPage() {
                 onClick={clearReportSelection}
                 className="px-3 py-1.5 rounded border border-gray-300 text-gray-700 text-xs"
               >
-                Use All (Clear)
+                All Files
               </button>
               <button
                 onClick={() => loadReports().catch((e: Error) => setError(e.message))}
@@ -183,12 +183,25 @@ export default function DashboardPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {reports.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                  <tr
+                    key={r.id}
+                    onClick={() => toggleReport(r.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        toggleReport(r.id);
+                      }
+                    }}
+                    className={`cursor-pointer hover:bg-gray-50 ${selectedReportIds.includes(r.id) ? "bg-gray-50" : ""}`}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
                         checked={selectedReportIds.includes(r.id)}
                         onChange={() => toggleReport(r.id)}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </td>
                     <td className="px-4 py-3 text-gray-700">{r.filename}</td>
@@ -198,6 +211,8 @@ export default function DashboardPage() {
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => deleteReport(r.id, r.filename)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
                         disabled={deletingId === r.id}
                         className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 disabled:opacity-50"
                       >
@@ -231,6 +246,9 @@ export default function DashboardPage() {
                 Open Chat With Selection
               </button>
             </div>
+            <p className="mb-4 text-xs text-white/60">
+              The summary cards, detections table, chat handoff, and compliance export all follow the current file scope. Clear the selection to use all uploaded files.
+            </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
               <StatCard label="Total" value={data.total} />

@@ -111,12 +111,18 @@ export const api = {
   score: (reportIds?: string[]) =>
     req<ScoreSummary>(`/score${buildReportScopeQuery(reportIds)}`),
 
-  query: (question: string, reportIds: string[] = [], findingIds: string[] = []) =>
+  query: (question: string, reportIds: string[] = [], findingIds: string[] = [], sessionId?: string) =>
     req<QueryResponse>("/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, report_ids: reportIds, finding_ids: findingIds }),
+      body: JSON.stringify({ question, report_ids: reportIds, finding_ids: findingIds, session_id: sessionId ?? null }),
     }),
+
+  chatSessionHistory: (sessionId: string) =>
+    req<SessionHistoryResponse>(`/query/sessions/${encodeURIComponent(sessionId)}`),
+
+  downloadChatSession: async (sessionId: string) =>
+    downloadPdf(`/query/sessions/${encodeURIComponent(sessionId)}/download`, `ragscan_chat_${sessionId}.pdf`),
 
   ingest: (file: File) => {
     const fd = new FormData();
@@ -202,6 +208,18 @@ export interface QueryResponse {
   answer: string;
   sources: string[];
   intent: string;
+  session_id?: string | null;
+}
+
+export interface SessionMessage {
+  role: string;
+  text: string;
+  ts: string;
+}
+
+export interface SessionHistoryResponse {
+  session_id: string;
+  history: SessionMessage[];
 }
 
 export interface IngestResponse {

@@ -12,23 +12,27 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.config import settings
+from app.core.nist.mapper import get_controls
 
 SYSTEM_PROMPT = """You are RAGScan, a security intelligence assistant.
 
 Rules you must follow:
-1. Answer ONLY using the vulnerability findings provided below.
-2. Cite the finding ID and CVE for every claim you make, e.g. [Finding: <id>, CVE: <cve>].
-3. If the answer is not contained in the provided findings, say exactly: "This information is not in the retrieved findings."
-4. Do not speculate, guess, or add context not present in the findings.
-5. Prioritise findings with higher risk scores and CISA KEV status.
-6. Do not use emojis, markdown headings, bullet lists, tables, or code fences.
-7. Write plain text only, using short paragraphs.
+1. Treat the vulnerability findings as the primary evidence base.
+2. Treat the compliance mappings included with each finding as part of the primary scan context.
+3. If supplemental internet context is provided, use it only as secondary context to explain or reinforce the findings.
+4. Never contradict the findings or their mapped controls. If findings and supplemental context differ, trust the findings.
+5. Cite the finding ID and CVE for every claim grounded in a finding, e.g. [Finding: <id>, CVE: <cve>].
+6. If the answer is not contained in the provided findings, say exactly: "This information is not in the retrieved findings."
+7. Do not speculate or invent facts beyond the findings, their compliance mappings, and the supplemental context.
+8. Prioritise findings with higher risk scores and CISA KEV status.
+9. Do not use emojis, markdown headings, bullet lists, tables, or code fences.
+10. Write plain text only, using short paragraphs.
 
 Respond in clear, structured paragraphs. Be specific and concise."""
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", "Findings:\n{context}\n\nQuestion: {question}"),
+    ("human", "Findings:\n{context}\n\nSupplemental context:\n{supplemental_context}\n\nQuestion: {question}"),
 ])
 
 _chain = None
@@ -62,20 +66,33 @@ def format_findings(findings: list[dict]) -> str:
     parts = []
     for f in findings:
         kev = "YES (CISA KEV)" if f.get("cisa_kev") else "no"
+        nist_controls = get_controls(f.get("cwe_id"), f.get("severity_label", ""), "nist_csf")
+        iso_controls = get_controls(f.get("cwe_id"), f.get("severity_label", ""), "iso27001")
+        nist_text = ", ".join(f"{item.get('control_id')}: {item.get('description')}" for item in nist_controls) or "None"
+        iso_text = ", ".join(f"{item.get('control_id')}: {item.get('description')}" for item in iso_controls) or "None"
         parts.append(
             f"[Finding ID: {f.get('id')}]\n"
             f"  CVE: {f.get('cve_id') or 'N/A'} | Severity: {f.get('severity_label', '').upper()} | "
             f"Risk Score: {f.get('risk_score', 'N/A')}/100\n"
             f"  CVSS: {f.get('cvss3_score', 'N/A')} | EPSS: {f.get('epss_score', 'N/A')} | KEV: {kev}\n"
+            f"  CWE: {f.get('cwe_id') or 'N/A'}\n"
             f"  Host: {f.get('hostname', 'N/A')} ({f.get('host_ip', 'N/A')})\n"
             f"  Title: {f.get('title', 'N/A')}\n"
             f"  Description: {str(f.get('description') or '')[:400]}\n"
-            f"  Solution: {str(f.get('solution') or '')[:300]}"
+            f"  Solution: {str(f.get('solution') or '')[:300]}\n"
+            f"  NIST CSF mappings: {nist_text}\n"
+            f"  ISO 27001 mappings: {iso_text}"
         )
     return "\n\n".join(parts)
 
 
-async def query(question: str, findings: list[dict]) -> str:
+async def query(question: str, findings: list[dict], supplemental_context: str | None = None) -> str:
     context = format_findings(findings)
-    response = await _get_chain().ainvoke({"context": context, "question": question})
+    response = await _get_chain().ainvoke(
+        {
+            "context": context,
+            "supplemental_context": supplemental_context or "None.",
+            "question": question,
+        }
+    )
     return _clean_answer(response)

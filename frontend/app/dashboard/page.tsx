@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import AuthGuard from "@/components/AuthGuard";
-import { api, ScoreSummary, UploadReport } from "@/lib/api";
+import { api, ScoreSummary, UploadReport, MetricsTrendResponse } from "@/lib/api";
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -19,6 +19,8 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
 export default function DashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<ScoreSummary | null>(null);
+  const [metrics, setMetrics] = useState<{ total_queries: number; avg_retrieval_precision_at_10: number; avg_citation_accuracy: number; avg_hallucination_rate: number } | null>(null);
+  const [trend, setTrend] = useState<MetricsTrendResponse | null>(null);
   const [reports, setReports] = useState<UploadReport[]>([]);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [deletingId, setDeletingId] = useState<string>("");
@@ -40,6 +42,14 @@ export default function DashboardPage() {
   useEffect(() => {
     api.score(selectedReportIds)
       .then(setData)
+      .catch((e: Error) => setError(e.message));
+    api.metricsOverview(selectedReportIds)
+      .then((rows) => {
+        setMetrics(rows);
+      })
+      .catch((e: Error) => setError(e.message));
+    api.metricsTrend(selectedReportIds, 14)
+      .then(setTrend)
       .catch((e: Error) => setError(e.message));
   }, [selectedReportIds]);
 
@@ -258,6 +268,82 @@ export default function DashboardPage() {
               <StatCard label="Low" value={data.low} />
               <StatCard label="KEV" value={data.kev_count} sub="CISA known-exploited" />
               <StatCard label="Avg Risk" value={data.avg_risk_score.toFixed(1)} sub="out of 100" />
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="font-medium text-gray-800">Grounding Metrics</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Live query metrics for the current file scope. Clear selection to view all uploaded files.
+                  </p>
+                </div>
+                {metrics && (
+                  <span className="text-xs text-gray-500">
+                    {metrics.total_queries} query{metrics.total_queries === 1 ? "" : "ies"}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <StatCard
+                  label="Evidence Precision@10"
+                  value={metrics ? metrics.avg_retrieval_precision_at_10.toFixed(3) : "0.000"}
+                  sub="Retrieved sources used in answers"
+                />
+                <StatCard
+                  label="Citation Accuracy"
+                  value={metrics ? metrics.avg_citation_accuracy.toFixed(3) : "0.000"}
+                  sub="Cited finding IDs matching sources"
+                />
+                <StatCard
+                  label="Hallucination Rate"
+                  value={metrics ? metrics.avg_hallucination_rate.toFixed(3) : "0.000"}
+                  sub="Unsupported sentences / total sentences"
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="font-medium text-gray-800">Summary Over Time</h3>
+                  <p className="text-xs text-gray-500 mt-1">Daily averages for the last 14 days in the current scope.</p>
+                </div>
+                <span className="text-xs text-gray-500">
+                  {trend ? `${trend.total_queries} total query${trend.total_queries === 1 ? "" : "ies"}` : "0 total queries"}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Day</th>
+                      <th className="px-4 py-3 text-right">Queries</th>
+                      <th className="px-4 py-3 text-right">P@10</th>
+                      <th className="px-4 py-3 text-right">Citation</th>
+                      <th className="px-4 py-3 text-right">Hallucination</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {(trend?.points ?? []).slice().reverse().map((point) => (
+                      <tr key={point.day} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-700">{point.day}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{point.queries}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{point.avg_retrieval_precision_at_10.toFixed(3)}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{point.avg_citation_accuracy.toFixed(3)}</td>
+                        <td className="px-4 py-3 text-right text-gray-700">{point.avg_hallucination_rate.toFixed(3)}</td>
+                      </tr>
+                    ))}
+                    {(trend?.points.length ?? 0) === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-6 text-center text-gray-500">
+                          No query metrics yet for this scope.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">

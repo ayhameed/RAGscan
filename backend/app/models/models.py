@@ -138,6 +138,22 @@ class ChatSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ResponseMetric(Base):
+    __tablename__ = "response_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL"))
+    scope_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    retrieval_precision_at_10: Mapped[float] = mapped_column(Float, default=0.0)
+    citation_accuracy: Mapped[float] = mapped_column(Float, default=0.0)
+    hallucination_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    citation_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 

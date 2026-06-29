@@ -2,7 +2,7 @@
 
 Retrieval-augmented vulnerability intelligence and compliance gap analysis.
 
-RAGScan ingests structured scan data (Nessus XML, OpenSCAP XCCDF), enriches every finding with live threat intelligence from NVD, FIRST EPSS, and the CISA KEV catalog, computes a composite risk score, stores findings in a pgvector embedding store, and exposes a LangChain-orchestrated agent that answers natural-language questions grounded in retrieved findings. A Next.js dashboard provides a browser interface for importing scans, viewing risk scores, and querying the agent. All LLM responses are strictly anchored to retrieved findings with mandatory citations — hallucination is treated as a first-class failure mode.
+RAGScan ingests structured scan data (Nessus XML, OpenSCAP XCCDF), enriches every finding with live threat intelligence from NVD, FIRST EPSS, and the CISA KEV catalog, computes a composite risk score, stores findings in a pgvector embedding store, and exposes a LangChain-orchestrated agent that answers natural-language questions using retrieved scan findings as the primary context. Optional NVD/EPSS internet context can also be supplied as secondary context to help explain or reinforce those findings, but it does not override the scan evidence. A Next.js dashboard provides a browser interface for importing scans, viewing risk scores, and querying the agent. Hallucination is treated as a first-class failure mode.
 
 ## Architecture
 
@@ -101,10 +101,15 @@ python scripts/load_demo_data.py --url http://localhost:8000
 | DELETE | `/ingest/reports/{report_id}` | Bearer | Delete an uploaded report and associated findings |
 | DELETE | `/ingest/reports` | Bearer | Purge all uploaded reports and associated findings for current user |
 | GET | `/score` | Bearer | Findings ranked by risk score (`report_id` optional) |
-| POST | `/query` | Bearer | Natural-language query over findings (`report_id` and `finding_ids` optional) |
+| POST | `/query` | Bearer | Natural-language query over findings (`report_id`, `report_ids`, `finding_ids`, `session_id`, `include_internet_context` optional) |
+| GET | `/query/sessions/{session_id}` | Bearer | Load stored conversation history |
+| GET | `/query/sessions/{session_id}/download` | Bearer | Download conversation transcript as PDF |
+| DELETE | `/query/sessions/{session_id}` | Bearer | Delete a stored chat session |
 | GET | `/analyse/{id}` | Bearer | Deep analysis of a single finding |
 | POST | `/report` | Bearer | Generate NIST CSF or ISO 27001 gap report PDF |
 | GET | `/report/{id}/download` | Bearer | Download generated report |
+| GET | `/metrics/overview` | Bearer | Scope-aware average query grounding metrics |
+| GET | `/metrics/trend` | Bearer | Scope-aware daily grounding metrics trend (`days` query param) |
 | GET | `/audit` | Bearer | Activity log (paginated: `page`, `page_size`) |
 | GET | `/health` | — | Liveness check |
 
@@ -143,11 +148,20 @@ This composite is motivated by Jacobs et al. (2021) and Spring et al. (2021), wh
 
 ## Hallucination mitigation
 
-The LLM is given only the retrieved finding context. The system prompt requires Claude to:
+The LLM is given retrieved finding context as the primary evidence base for grounded answers.
 
-1. Cite every claim with `[Finding: <id>, CVE: <cve>]`.
-2. State "This information is not in the retrieved findings" when the answer is absent.
-3. Not speculate beyond the provided data.
+When the chat toggle for internet context is enabled, the LLM may also receive supplemental NVD/EPSS context as a secondary input. The prompt explicitly instructs the model to trust the retrieved findings first and use internet context only to reinforce or explain them.
+
+Runtime hallucination scoring uses semantic support against retrieved findings rather than citation-only checks:
+
+1. Split the answer into sentences.
+2. For each sentence, compare semantic token overlap with retrieved finding evidence (title, description, solution, severity, CVE).
+3. Mark a sentence unsupported if it has weak overlap with all retrieved findings.
+4. If a sentence cites finding IDs that are not in retrieved sources, mark it unsupported.
+
+Hallucination rate is `unsupported_sentences / total_sentences`.
+
+Citations are still strongly encouraged for traceability, but uncited factual statements can count as supported when semantically grounded in retrieved evidence.
 
 Temperature is 0.1 (near-deterministic). This follows Lewis et al. (2020), who demonstrate that retrieval-grounded generation substantially reduces unsupported claims.
 
@@ -210,6 +224,71 @@ docker-compose.yml
 - Export uses the currently selected report scope when provided.
 - Use **Reports** to view uploaded files with uploader/date and delete selected uploaded reports.
 - Use **Logs** (`/logs`) to view activity history including who performed each operation and when.
+
+## Evaluation Metrics
+
+To show retrieval quality and answer grounding, use a labeled JSONL evaluation set and run the metrics script:
+
+```bash
+cd backend
+source venv/bin/activate
+python ../scripts/evaluate_rag_metrics.py ../sample_data/eval_cases.jsonl --html-out ../reports/eval_report.html --pdf-out ../reports/eval_report.pdf
+```
+
+The included `sample_data/eval_cases.jsonl` file is a template. Replace the placeholder IDs with labeled cases before using the output as a real benchmark.
+
+Each JSONL row should look like this:
+
+```json
+{"question": "Which findings are KEV?", "expected_finding_ids": ["..."], "report_ids": ["..."], "expected_controls": ["PR.IP-12"], "expected_risk_score": 91.2, "gold_citation_ids": ["..."], "framework": "nist_csf"}
+```
+
+Recommended ground-truth file format:
+
+- `question`: user query or evaluation prompt.
+- `expected_finding_ids`: the finding IDs that should be retrieved for `precision@10`.
+- `gold_citation_ids`: the finding IDs that should appear in the answer citations.
+- `expected_controls`: the expected NIST/ISO control IDs for mapping fidelity.
+- `expected_risk_score`: optional numeric reference for risk-score correlation.
+- `framework`: `nist_csf` or `iso27001` when control mapping should be checked.
+
+The script prints a summary for grounded RAG answers and an ungrounded baseline:
+
+| Metric | What it measures |
+|--------|------------------|
+| Retrieval precision@10 | Relevant findings returned in the top 10 retrieved results divided by 10 |
+| Citation accuracy | Share of cited finding IDs that are correct for the gold answer |
+| Hallucination rate | Share of answer sentences that are not semantically supported by retrieved findings (with invalid cited IDs penalized) |
+| Ungrounded baseline | Same question answered without retrieved findings, so you can compare grounding quality |
+
+Recommended presentation format:
+
+| Run | Precision@10 | Citation Accuracy | Hallucination Rate |
+|-----|-------------:|------------------:|-------------------:|
+| Grounded RAG | 0.82 | 0.91 | 0.08 |
+| Ungrounded baseline | 0.00 | 0.12 | 0.74 |
+
+If you want a stronger claim for hallucination rate, add a second-pass judge that labels each sentence as supported or unsupported by the retrieved findings.
+
+Finding ID note:
+
+- `findings.id` is the canonical identifier used in retrieval output and citations.
+- `finding_embeddings` stores vectors keyed by `finding_id`, so each vector maps 1:1 to a finding row.
+
+The dashboard also shows live grounding metrics for the current upload scope:
+
+- Evidence Precision@10: how often the top retrieved sources are actually used in the answer.
+- Citation Accuracy: how often cited finding IDs match retrieved sources.
+- Hallucination Rate: semantically unsupported sentences divided by total sentences.
+
+Chat controls:
+
+- **Show internet context** toggle: enables/disables secondary NVD/EPSS context lookup and supplemental reasoning context per query.
+- **Clear Session** button: clears local chat state and deletes the persisted backend session.
+
+The offline HTML and PDF reports also include NIST/ISO mapping fidelity and risk score correlation when `expected_controls` and `expected_risk_score` are provided in the JSONL file.
+
+Use the dashboard metrics for operational monitoring and the labeled JSONL benchmark for journal-style comparisons against an ungrounded baseline.
 
 ## References
 

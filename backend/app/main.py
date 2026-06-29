@@ -14,7 +14,7 @@ from app.core.enrichment.enricher import load_kev
 from app.core.nist.mapper import seed_mappings
 from app.db.init_db import init_db
 from app.db.session import AsyncSessionLocal
-from app.api.routes import auth, ingest, query, score, report, analyse, audit
+from app.api.routes import auth, ingest, query, score, report, analyse, audit, metrics
 
 log = logging.getLogger("ragscan")
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +65,7 @@ app.include_router(auth.router, prefix="/auth")
 app.include_router(ingest.router, prefix="/ingest")
 app.include_router(query.router, prefix="/query")
 app.include_router(score.router, prefix="/score")
+app.include_router(metrics.router, prefix="/metrics")
 app.include_router(report.router, prefix="/report")
 app.include_router(analyse.router, prefix="/analyse")
 app.include_router(audit.router, prefix="/audit")

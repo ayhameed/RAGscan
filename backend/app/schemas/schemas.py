@@ -55,6 +55,15 @@ class QueryRequest(BaseModel):
     report_id: Optional[uuid.UUID] = None
     report_ids: list[uuid.UUID] = Field(default_factory=list)
     finding_ids: list[uuid.UUID] = Field(default_factory=list)
+    include_internet_context: bool = True
+
+
+class QueryMetricsOut(BaseModel):
+    retrieval_precision_at_10: float
+    citation_accuracy: float
+    hallucination_rate: float
+    source_count: int
+    citation_count: int
 
 
 class QueryResponse(BaseModel):
@@ -62,6 +71,8 @@ class QueryResponse(BaseModel):
     sources: list[str]
     intent: str
     session_id: Optional[uuid.UUID] = None
+    metrics: Optional[QueryMetricsOut] = None
+    secondary_context: Optional[str] = None
 
 
 class SessionMessage(BaseModel):
@@ -151,3 +162,29 @@ class AuditLogPageOut(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class MetricsOverviewOut(BaseModel):
+    scope_key: str
+    total_queries: int
+    avg_retrieval_precision_at_10: float
+    avg_citation_accuracy: float
+    avg_hallucination_rate: float
+
+
+class MetricsTrendPointOut(BaseModel):
+    day: str
+    queries: int
+    avg_retrieval_precision_at_10: float
+    avg_citation_accuracy: float
+    avg_hallucination_rate: float
+
+
+class MetricsTrendOut(BaseModel):
+    scope_key: str
+    days: int
+    total_queries: int
+    avg_retrieval_precision_at_10: float
+    avg_citation_accuracy: float
+    avg_hallucination_rate: float
+    points: list[MetricsTrendPointOut]

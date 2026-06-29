@@ -2,13 +2,15 @@
 import { useState, useRef, useEffect, FormEvent } from "react";
 import Nav from "@/components/Nav";
 import AuthGuard from "@/components/AuthGuard";
-import { api, QueryResponse, UploadReport, Finding } from "@/lib/api";
+import { api, QueryResponse, UploadReport, Finding, QueryMetrics } from "@/lib/api";
 
 interface Message {
   role: "user" | "assistant";
   text: string;
   sources?: string[];
   intent?: string;
+  metrics?: QueryMetrics;
+  secondaryContext?: string;
 }
 
 const STARTERS = [
@@ -47,6 +49,27 @@ function ChatBubble({ msg }: { msg: Message }) {
             Intent: <span className="font-medium">{msg.intent}</span>
           </p>
         )}
+        {msg.metrics && (
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-500">
+            <div className="rounded border border-gray-200 px-2 py-1">
+              P@10: {msg.metrics.retrieval_precision_at_10.toFixed(3)}
+            </div>
+            <div className="rounded border border-gray-200 px-2 py-1">
+              Citation: {msg.metrics.citation_accuracy.toFixed(3)}
+            </div>
+            <div className="rounded border border-gray-200 px-2 py-1">
+              Hallucination: {msg.metrics.hallucination_rate.toFixed(3)}
+            </div>
+            <div className="rounded border border-gray-200 px-2 py-1">
+              Sources/Citations: {msg.metrics.source_count}/{msg.metrics.citation_count}
+            </div>
+          </div>
+        )}
+        {msg.secondaryContext && (
+          <div className="mt-2 rounded border border-emerald-200 bg-emerald-50 px-2 py-2 text-xs text-emerald-900 whitespace-pre-wrap">
+            {msg.secondaryContext}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -60,6 +83,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string>("");
   const [exporting, setExporting] = useState(false);
+  const [showInternetContext, setShowInternetContext] = useState(true);
   const [reports, setReports] = useState<UploadReport[]>([]);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -141,6 +165,7 @@ export default function ChatPage() {
         selectedReportIds,
         selectedFindingIds,
         sessionId || undefined,
+        showInternetContext,
       );
       if (res.session_id && res.session_id !== sessionId) {
         setSessionId(res.session_id);
@@ -151,6 +176,8 @@ export default function ChatPage() {
         text: res.answer,
         sources: res.sources,
         intent: res.intent,
+        metrics: res.metrics ?? undefined,
+        secondaryContext: res.secondary_context ?? undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err: unknown) {
@@ -197,6 +224,19 @@ export default function ChatPage() {
     }
   }
 
+  async function clearSession() {
+    const current = sessionId;
+    setMessages([]);
+    setSessionId("");
+    window.localStorage.removeItem("ragscan_chat_session_id");
+    if (!current) return;
+    try {
+      await api.clearChatSession(current);
+    } catch {
+      // Session is already cleared locally; backend cleanup can fail silently.
+    }
+  }
+
   return (
     <AuthGuard>
       <Nav />
@@ -228,6 +268,14 @@ export default function ChatPage() {
                   ? `Semantic retrieval over ${selectedReportIds.length} selected file(s)`
                   : "No file selected: querying across all uploaded findings"}
               </span>
+              <label className="flex items-center gap-2 text-xs text-white/80">
+                <input
+                  type="checkbox"
+                  checked={showInternetContext}
+                  onChange={(e) => setShowInternetContext(e.target.checked)}
+                />
+                Show internet context
+              </label>
               <button
                 type="button"
                 onClick={exportConversationPdf}
@@ -235,6 +283,14 @@ export default function ChatPage() {
                 className="px-3 py-1.5 rounded-lg border border-white/25 text-white hover:bg-white/10 disabled:opacity-40"
               >
                 {exporting ? "Exporting PDF..." : "Export Conversation PDF"}
+              </button>
+              <button
+                type="button"
+                onClick={clearSession}
+                disabled={messages.length === 0 && !sessionId}
+                className="px-3 py-1.5 rounded-lg border border-white/25 text-white hover:bg-white/10 disabled:opacity-40"
+              >
+                Clear Session
               </button>
             </div>
           </div>

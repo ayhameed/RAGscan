@@ -33,6 +33,16 @@ function buildReportScopeQuery(reportIds?: string[]): string {
   return q ? `?${q}` : "";
 }
 
+function buildMetricsScopeQuery(reportIds?: string[]): string {
+  if (!reportIds || reportIds.length === 0) return "";
+  const qs = new URLSearchParams();
+  for (const id of reportIds) {
+    qs.append("report_ids", id);
+  }
+  const q = qs.toString();
+  return q ? `?${q}` : "";
+}
+
 async function downloadPdf(path: string, filename: string): Promise<void> {
   const token = getToken();
   let res: Response | null = null;
@@ -111,15 +121,41 @@ export const api = {
   score: (reportIds?: string[]) =>
     req<ScoreSummary>(`/score${buildReportScopeQuery(reportIds)}`),
 
-  query: (question: string, reportIds: string[] = [], findingIds: string[] = [], sessionId?: string) =>
+  query: (
+    question: string,
+    reportIds: string[] = [],
+    findingIds: string[] = [],
+    sessionId?: string,
+    includeInternetContext = true,
+  ) =>
     req<QueryResponse>("/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, report_ids: reportIds, finding_ids: findingIds, session_id: sessionId ?? null }),
+      body: JSON.stringify({
+        question,
+        report_ids: reportIds,
+        finding_ids: findingIds,
+        session_id: sessionId ?? null,
+        include_internet_context: includeInternetContext,
+      }),
     }),
 
   chatSessionHistory: (sessionId: string) =>
     req<SessionHistoryResponse>(`/query/sessions/${encodeURIComponent(sessionId)}`),
+
+  clearChatSession: async (sessionId: string) => {
+    const token = getToken();
+    const res = await fetch(`${BASE}/query/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+  },
 
   downloadChatSession: async (sessionId: string) =>
     downloadPdf(`/query/sessions/${encodeURIComponent(sessionId)}/download`, `ragscan_chat_${sessionId}.pdf`),
@@ -173,6 +209,12 @@ export const api = {
 
   downloadComplianceReport: async (reportId: string, filename = `ragscan_${reportId}.pdf`) =>
     downloadPdf(`/report/${encodeURIComponent(reportId)}/download`, filename),
+
+  metricsOverview: (reportIds?: string[]) =>
+    req<MetricsOverviewResponse>(`/metrics/overview${buildMetricsScopeQuery(reportIds)}`),
+
+  metricsTrend: (reportIds?: string[], days = 14) =>
+    req<MetricsTrendResponse>(`/metrics/trend${buildMetricsScopeQuery(reportIds)}${buildMetricsScopeQuery(reportIds) ? "&" : "?"}days=${encodeURIComponent(String(days))}`),
 };
 
 export interface Finding {
@@ -209,6 +251,16 @@ export interface QueryResponse {
   sources: string[];
   intent: string;
   session_id?: string | null;
+  metrics?: QueryMetrics | null;
+  secondary_context?: string | null;
+}
+
+export interface QueryMetrics {
+  retrieval_precision_at_10: number;
+  citation_accuracy: number;
+  hallucination_rate: number;
+  source_count: number;
+  citation_count: number;
 }
 
 export interface SessionMessage {
@@ -263,4 +315,32 @@ export interface AuditLogPage {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface MetricsOverview {
+  scope_key: string;
+  total_queries: number;
+  avg_retrieval_precision_at_10: number;
+  avg_citation_accuracy: number;
+  avg_hallucination_rate: number;
+}
+
+export interface MetricsOverviewResponse extends MetricsOverview {}
+
+export interface MetricsTrendPoint {
+  day: string;
+  queries: number;
+  avg_retrieval_precision_at_10: number;
+  avg_citation_accuracy: number;
+  avg_hallucination_rate: number;
+}
+
+export interface MetricsTrendResponse {
+  scope_key: string;
+  days: number;
+  total_queries: number;
+  avg_retrieval_precision_at_10: number;
+  avg_citation_accuracy: number;
+  avg_hallucination_rate: number;
+  points: MetricsTrendPoint[];
 }

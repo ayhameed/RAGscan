@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     nvd_api_key: str = ""
     jwt_secret: str = "dev-secret-change-in-prod"
     environment: str = "dev"
+    cors_origins: str = ""
 
     # LLM
     llm_model: str = "claude-sonnet-4-6"
@@ -31,6 +32,24 @@ class Settings(BaseSettings):
     # RAG
     retrieval_k: int = 10
     risk_gap_threshold: float = 40.0
+
+    @property
+    def allowed_cors_origins(self) -> list[str]:
+        if self.cors_origins.strip():
+            return [
+                origin.strip().rstrip("/")
+                for origin in self.cors_origins.split(",")
+                if origin.strip()
+            ]
+
+        if self.environment == "dev":
+            return [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://0.0.0.0:3000",
+            ]
+
+        return []
 
 
 settings = Settings()

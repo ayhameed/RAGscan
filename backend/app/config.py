@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,10 +42,28 @@ class Settings(BaseSettings):
             return value
 
         if value.startswith("postgres://"):
-            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+            value = value.replace("postgres://", "postgresql+asyncpg://", 1)
 
         if value.startswith("postgresql://") and "+asyncpg" not in value:
-            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+            value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        parts = urlsplit(value)
+        if not parts.query:
+            return value
+
+        query_items = []
+        changed = False
+        for key, query_value in parse_qsl(parts.query, keep_blank_values=True):
+            if key == "sslmode":
+                query_items.append(("ssl", query_value))
+                changed = True
+            else:
+                query_items.append((key, query_value))
+
+        if not changed:
+            return value
+
+        return urlunsplit(parts._replace(query=urlencode(query_items)))
 
         return value
 

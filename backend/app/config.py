@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +33,20 @@ class Settings(BaseSettings):
     # RAG
     retrieval_k: int = 10
     risk_gap_threshold: float = 40.0
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def ensure_async_database_driver(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        if value.startswith("postgresql://") and "+asyncpg" not in value:
+            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        return value
 
     @property
     def allowed_cors_origins(self) -> list[str]:

@@ -10,7 +10,8 @@ dist/
 build/
 .DS_Store
 *.nessus
-reports/
+/reports/
+/backend/reports/
 *.pdf
 node_modules/
 .next/

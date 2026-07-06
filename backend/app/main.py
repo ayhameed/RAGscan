@@ -25,11 +25,23 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting up RAGScan...")
-    await init_db()
-    async with AsyncSessionLocal() as session:
-        await seed_mappings(session)
-    async with httpx.AsyncClient() as client:
-        await load_kev(client)
+    try:
+        log.info("Initializing database schema...")
+        await init_db()
+        log.info("Database schema ready.")
+
+        log.info("Seeding control mappings...")
+        async with AsyncSessionLocal() as session:
+            await seed_mappings(session)
+        log.info("Control mappings ready.")
+
+        log.info("Loading KEV catalog...")
+        async with httpx.AsyncClient() as client:
+            await load_kev(client)
+        log.info("KEV catalog ready.")
+    except Exception:
+        log.exception("Startup failed during initialization")
+        raise
     log.info("Startup complete.")
     yield
     log.info("Shutting down.")

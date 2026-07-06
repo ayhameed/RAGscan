@@ -8,6 +8,23 @@ Per response, the evaluator computes:
 - NIST/ISO mapping fidelity
 - risk score correlation proxy
 
+Optional (flagged):
+- LLM-judged free-text faithfulness and contextual precision/recall via DeepEval
+
+DeepEval scope guardrail:
+- DeepEval is used only for free-text grounding checks and is never used for
+    deterministic structured metrics (citations, mapping fidelity, structured
+    retrieval checks).
+- The generator model is Claude (`settings.llm_model`), so the DeepEval judge
+    must use a different model family. Configure `EVAL_JUDGE_MODEL` (default:
+    GPT-family) and keep it non-Claude to reduce self-preference bias.
+
+Usage:
+- Deterministic only (default):
+    python scripts/evaluate_rag_metrics.py sample_data/eval_cases.jsonl
+- Deterministic + DeepEval free-text section:
+    python scripts/evaluate_rag_metrics.py sample_data/eval_cases.jsonl --with-deepeval
+
 It also writes a compact HTML report and a PDF report so the results can be shared
 in a paper, slide deck, or appendix.
 """
@@ -19,6 +36,7 @@ import asyncio
 import json
 import re
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
@@ -41,12 +59,14 @@ from sqlalchemy import select  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore
 
 from app.config import settings  # type: ignore
-from app.core.rag.chain import query as grounded_answer  # type: ignore
+from app.core.rag.chain import format_findings, query as grounded_answer  # type: ignore
 from app.core.rag.retriever import retrieve  # type: ignore
 from app.db.session import AsyncSessionLocal  # type: ignore
+from app.models.models import Finding  # type: ignore
 from app.models.models import ScanUpload  # type: ignore
 
 FINDING_CITATION_RE = re.compile(r"\[Finding:\s*([0-9a-fA-F-]{8,})\s*,\s*CVE:")
+FINDING_CITATION_BLOCK_RE = re.compile(r"\[Finding:[^\]]+\]")
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}")
 _STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "have", "has",
@@ -111,6 +131,27 @@ def _precision_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float
     top10 = retrieved_ids[:10]
     expected = set(expected_ids)
     return sum(1 for item in top10 if item in expected) / 10.0
+
+
+def _normalized_precision_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float:
+    if not retrieved_ids or not expected_ids:
+        return 0.0
+    top10 = retrieved_ids[:10]
+    expected = set(expected_ids)
+    hits = sum(1 for item in top10 if item in expected)
+    denom = min(10, len(expected))
+    if denom == 0:
+        return 0.0
+    return hits / denom
+
+
+def _recall_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float:
+    if not expected_ids:
+        return 0.0
+    top10 = retrieved_ids[:10]
+    expected = set(expected_ids)
+    hits = sum(1 for item in top10 if item in expected)
+    return hits / len(expected)
 
 
 def _citation_accuracy(answer: str, gold_ids: list[str]) -> float:
@@ -223,6 +264,156 @@ async def _fetch_scope(session: AsyncSession, report_ids: list[str]) -> list[str
     return [str(item) for item in rows]
 
 
+def _extract_free_text(answer: str) -> str:
+    # Remove explicit structured citation blocks to focus the judge on narrative grounding.
+    text = FINDING_CITATION_BLOCK_RE.sub("", answer)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _row_to_chain_finding(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "cve_id": row.get("cve_id"),
+        "cwe_id": row.get("cwe_id"),
+        "title": row.get("title"),
+        "description": row.get("description"),
+        "solution": row.get("solution"),
+        "severity_label": row.get("severity_label"),
+        "cvss3_score": row.get("cvss3_score"),
+        "epss_score": row.get("epss_score"),
+        "cisa_kev": row.get("cisa_kev"),
+        "risk_score": row.get("risk_score"),
+        "hostname": row.get("hostname"),
+        "host_ip": row.get("host_ip"),
+    }
+
+
+def _model_to_chain_finding(item: Finding) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "cve_id": item.cve_id,
+        "cwe_id": item.cwe_id,
+        "title": item.title,
+        "description": item.description,
+        "solution": item.solution,
+        "severity_label": item.severity_label,
+        "cvss3_score": item.cvss3_score,
+        "epss_score": item.epss_score,
+        "cisa_kev": item.cisa_kev,
+        "risk_score": item.risk_score,
+        "hostname": item.hostname,
+        "host_ip": item.host_ip,
+    }
+
+
+def _validate_eval_judge_model() -> str:
+    judge_model = str(getattr(settings, "eval_judge_model", "gpt-4.1-mini") or "gpt-4.1-mini").strip()
+    # Guardrail: avoid same-family self-judging against Claude-generated answers.
+    if "claude" in judge_model.lower():
+        raise SystemExit(
+            "EVAL_JUDGE_MODEL must be a non-Claude model family (for example GPT-4-class) to avoid self-preference bias"
+        )
+    return judge_model
+
+
+async def _load_expected_context_texts(session: AsyncSession, expected_ids: list[str]) -> list[str]:
+    if not expected_ids:
+        return []
+    uuids: list[uuid.UUID] = []
+    for item in expected_ids:
+        try:
+            uuids.append(uuid.UUID(str(item)))
+        except ValueError:
+            continue
+    if not uuids:
+        return []
+
+    rows = (await session.execute(select(Finding).where(Finding.id.in_(uuids)))).scalars().all()
+    texts: list[str] = []
+    for row in rows:
+        texts.append(format_findings([_model_to_chain_finding(row)]))
+    return texts
+
+
+async def _evaluate_deepeval_case(case: EvalCase, judge_model: str, faithfulness_threshold: float) -> dict[str, Any]:
+    from deepeval.metrics import ContextualPrecisionMetric, ContextualRecallMetric, FaithfulnessMetric  # type: ignore
+    from deepeval.test_case import LLMTestCase  # type: ignore
+
+    async with AsyncSessionLocal() as session:
+        scope_ids = await _fetch_scope(session, case.report_ids)
+        retrieved = await retrieve(case.question, session, report_ids=scope_ids)
+        grounded_text = await grounded_answer(case.question, retrieved)
+        expected_context = await _load_expected_context_texts(session, case.expected_finding_ids)
+
+    retrieval_context = [format_findings([_row_to_chain_finding(item)]) for item in retrieved]
+    free_text_output = _extract_free_text(grounded_text)
+
+    test_case = LLMTestCase(
+        input=case.question,
+        actual_output=free_text_output,
+        retrieval_context=retrieval_context,
+        expected_context=expected_context,
+        expected_output="Narrative answer must remain grounded in retrieved scan evidence.",
+    )
+
+    faithfulness_metric = FaithfulnessMetric(
+        threshold=faithfulness_threshold,
+        model=judge_model,
+        include_reason=True,
+        async_mode=False,
+    )
+    contextual_precision_metric = ContextualPrecisionMetric(
+        threshold=0.0,
+        model=judge_model,
+        include_reason=True,
+        async_mode=False,
+    )
+    contextual_recall_metric = ContextualRecallMetric(
+        threshold=0.0,
+        model=judge_model,
+        include_reason=True,
+        async_mode=False,
+    )
+
+    faithfulness_metric.measure(test_case)
+    contextual_precision_metric.measure(test_case)
+    contextual_recall_metric.measure(test_case)
+
+    return {
+        "question": case.question,
+        "faithfulness_score": float(faithfulness_metric.score or 0.0),
+        "faithfulness_passed": bool(faithfulness_metric.is_successful()),
+        "faithfulness_reason": str(getattr(faithfulness_metric, "reason", "") or ""),
+        "contextual_precision_score": float(contextual_precision_metric.score or 0.0),
+        "contextual_recall_score": float(contextual_recall_metric.score or 0.0),
+    }
+
+
+async def _evaluate_with_deepeval(cases: list[EvalCase], faithfulness_threshold: float) -> dict[str, Any]:
+    judge_model = _validate_eval_judge_model()
+    rows = [await _evaluate_deepeval_case(case, judge_model, faithfulness_threshold) for case in cases]
+    avg_faithfulness = mean(item["faithfulness_score"] for item in rows) if rows else 0.0
+    pass_rate = (
+        sum(1 for item in rows if item["faithfulness_passed"]) / len(rows)
+        if rows
+        else 0.0
+    )
+    avg_contextual_precision = mean(item["contextual_precision_score"] for item in rows) if rows else 0.0
+    avg_contextual_recall = mean(item["contextual_recall_score"] for item in rows) if rows else 0.0
+    return {
+        "judge_model": judge_model,
+        "faithfulness_threshold": faithfulness_threshold,
+        "rows": rows,
+        "summary": {
+            "avg_faithfulness": avg_faithfulness,
+            "faithfulness_pass_rate": pass_rate,
+            "avg_contextual_precision": avg_contextual_precision,
+            "avg_contextual_recall": avg_contextual_recall,
+        },
+    }
+
+
 async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
     async with AsyncSessionLocal() as session:
         scope_ids = await _fetch_scope(session, case.report_ids)
@@ -234,6 +425,8 @@ async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
 
         grounded_metrics = {
             "precision_at_10": _precision_at_10(retrieved_ids, case.expected_finding_ids),
+            "normalized_precision_at_10": _normalized_precision_at_10(retrieved_ids, case.expected_finding_ids),
+            "recall_at_10": _recall_at_10(retrieved_ids, case.expected_finding_ids),
             "citation_accuracy": _citation_accuracy(grounded_text, case.gold_citation_ids),
             "hallucination_rate": _hallucination_rate(grounded_text, retrieved),
             "mapping_fidelity": _mapping_fidelity(retrieved, case.expected_controls, case.framework),
@@ -248,8 +441,10 @@ async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
         return {"question": case.question, "grounded": grounded_metrics, "baseline": baseline_metrics}
 
 
-def _print_summary(rows: list[dict[str, Any]]) -> None:
+def _print_summary(rows: list[dict[str, Any]], deepeval: dict[str, Any] | None = None) -> None:
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -271,12 +466,26 @@ def _print_summary(rows: list[dict[str, Any]]) -> None:
     print("RAGScan evaluation summary")
     print(f"Cases: {len(rows)}")
     print(f"Retrieval precision@10: {grounded_p10:.3f}")
+    print(f"Retrieval normalized precision@10: {grounded_np10:.3f}")
+    print(f"Retrieval recall@10: {grounded_r10:.3f}")
     print(f"Citation accuracy: {grounded_citation:.3f}")
     print(f"Hallucination rate: {grounded_hallucination:.3f}")
     print(f"NIST/ISO mapping fidelity: {grounded_mapping_fidelity:.3f}")
     print(f"Risk score correlation: {risk_score_corr:.3f}")
     print(f"Ungrounded baseline citation accuracy: {baseline_citation:.3f}")
     print(f"Ungrounded baseline hallucination rate: {baseline_hallucination:.3f}")
+
+    if deepeval is not None:
+        summary = deepeval["summary"]
+        print()
+        print("LLM-judged (free-text) summary")
+        print(f"Judge model: {deepeval['judge_model']}")
+        print(f"Faithfulness threshold: {deepeval['faithfulness_threshold']:.2f}")
+        print(f"Faithfulness (avg): {summary['avg_faithfulness']:.3f}")
+        print(f"Faithfulness pass rate: {summary['faithfulness_pass_rate']:.3f}")
+        print(f"Contextual precision (avg): {summary['avg_contextual_precision']:.3f}")
+        print(f"Contextual recall (avg): {summary['avg_contextual_recall']:.3f}")
+
     print()
     print("Per-case metrics")
     for row in rows:
@@ -293,9 +502,11 @@ def _escape_html(text: str) -> str:
     )
 
 
-def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
+def _render_html(path: Path, rows: list[dict[str, Any]], deepeval: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -310,6 +521,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
             "<tr>"
             f"<td>{_escape_html(row['question'])}</td>"
             f"<td>{g['precision_at_10']:.3f}</td>"
+            f"<td>{g['normalized_precision_at_10']:.3f}</td>"
+            f"<td>{g['recall_at_10']:.3f}</td>"
             f"<td>{g['citation_accuracy']:.3f}</td>"
             f"<td>{g['hallucination_rate']:.3f}</td>"
             f"<td>{g['mapping_fidelity']:.3f}</td>"
@@ -328,7 +541,7 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
     body {{ font-family: Arial, sans-serif; margin: 32px; color: #111827; }}
     h1 {{ margin-bottom: 4px; }}
     .meta {{ color: #6b7280; margin-bottom: 18px; }}
-    .cards {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0 24px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 18px 0 24px; }}
     .card {{ border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; background: #f9fafb; }}
     .card .label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; }}
     .card .value {{ font-size: 22px; font-weight: 700; margin-top: 4px; }}
@@ -343,6 +556,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
   <div class=\"meta\">Grounded RAG vs ungrounded baseline · {len(rows)} cases</div>
   <div class=\"cards\">
     <div class=\"card\"><div class=\"label\">Precision@10</div><div class=\"value\">{grounded_p10:.3f}</div></div>
+        <div class="card"><div class="label">Norm Precision@10</div><div class="value">{grounded_np10:.3f}</div></div>
+        <div class="card"><div class="label">Recall@10</div><div class="value">{grounded_r10:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Citation Accuracy</div><div class=\"value\">{grounded_citation:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Hallucination Rate</div><div class=\"value\">{grounded_hallucination:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Mapping Fidelity</div><div class=\"value\">{grounded_mapping_fidelity:.3f}</div></div>
@@ -353,6 +568,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
       <tr>
         <th>Question</th>
         <th>P@10</th>
+        <th>Norm P@10</th>
+        <th>R@10</th>
         <th>Citation Acc.</th>
         <th>Hallucination</th>
         <th>Mapping Fidelity</th>
@@ -366,10 +583,56 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
   </table>
 </body>
 </html>"""
+
+    llm_section = ""
+
+    if deepeval is not None:
+        summary = deepeval["summary"]
+        llm_rows: list[str] = []
+        for item in deepeval["rows"]:
+            llm_rows.append(
+                "<tr>"
+                f"<td>{_escape_html(item['question'])}</td>"
+                f"<td>{item['faithfulness_score']:.3f}</td>"
+                f"<td>{'yes' if item['faithfulness_passed'] else 'no'}</td>"
+                f"<td>{item['contextual_precision_score']:.3f}</td>"
+                f"<td>{item['contextual_recall_score']:.3f}</td>"
+                f"<td>{_escape_html(item['faithfulness_reason'])}</td>"
+                "</tr>"
+            )
+
+        llm_section = f"""
+    <h2>LLM-judged (free-text)</h2>
+    <p class=\"small\">Judge model: {_escape_html(deepeval['judge_model'])}. These metrics grade narrative grounding only; deterministic structured metrics remain authoritative.</p>
+    <div class=\"cards\">
+        <div class=\"card\"><div class=\"label\">Faithfulness Avg</div><div class=\"value\">{summary['avg_faithfulness']:.3f}</div></div>
+        <div class=\"card\"><div class=\"label\">Faithfulness Pass Rate</div><div class=\"value\">{summary['faithfulness_pass_rate']:.3f}</div></div>
+        <div class=\"card\"><div class=\"label\">Contextual Precision</div><div class=\"value\">{summary['avg_contextual_precision']:.3f}</div></div>
+        <div class=\"card\"><div class=\"label\">Contextual Recall</div><div class=\"value\">{summary['avg_contextual_recall']:.3f}</div></div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Question</th>
+                <th>Faithfulness</th>
+                <th>Pass</th>
+                <th>Contextual Precision</th>
+                <th>Contextual Recall</th>
+                <th>Judge Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(llm_rows)}
+        </tbody>
+    </table>
+"""
+    if llm_section:
+        html = html.replace("</body>", f"{llm_section}\n</body>")
+
     path.write_text(html, encoding="utf-8")
 
 
-def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
+def _render_pdf(path: Path, rows: list[dict[str, Any]], deepeval: dict[str, Any] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     styles = getSampleStyleSheet()
     title = ParagraphStyle("EvalTitle", parent=styles["Title"], fontSize=18, spaceAfter=10)
@@ -384,6 +647,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
     )
 
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -398,6 +663,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
         [
             ["Metric", "Value"],
             ["Precision@10", f"{grounded_p10:.3f}"],
+            ["Normalized Precision@10", f"{grounded_np10:.3f}"],
+            ["Recall@10", f"{grounded_r10:.3f}"],
             ["Citation Accuracy", f"{grounded_citation:.3f}"],
             ["Hallucination Rate", f"{grounded_hallucination:.3f}"],
             ["Mapping Fidelity", f"{grounded_mapping_fidelity:.3f}"],
@@ -417,7 +684,7 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
     )
     story.extend([summary_table, Spacer(1, 5 * mm)])
 
-    rows_data = [["Question", "P@10", "Citation", "Hallucination", "Mapping", "Risk proxy", "Baseline hallucination"]]
+    rows_data = [["Question", "P@10", "Norm P@10", "R@10", "Citation", "Hallucination", "Mapping", "Risk proxy", "Baseline hallucination"]]
     for row in rows:
         g = row["grounded"]
         b = row["baseline"]
@@ -426,6 +693,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
             [
                 Paragraph(_escape_html(row["question"]), body),
                 f"{g['precision_at_10']:.3f}",
+                f"{g['normalized_precision_at_10']:.3f}",
+                f"{g['recall_at_10']:.3f}",
                 f"{g['citation_accuracy']:.3f}",
                 f"{g['hallucination_rate']:.3f}",
                 f"{g['mapping_fidelity']:.3f}",
@@ -434,7 +703,7 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
             ]
         )
 
-    detail_table = Table(rows_data, colWidths=[58 * mm, 14 * mm, 16 * mm, 18 * mm, 16 * mm, 20 * mm, 20 * mm])
+    detail_table = Table(rows_data, colWidths=[50 * mm, 12 * mm, 14 * mm, 12 * mm, 14 * mm, 16 * mm, 14 * mm, 16 * mm, 18 * mm])
     detail_table.setStyle(
         TableStyle(
             [
@@ -448,6 +717,68 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
         )
     )
     story.append(detail_table)
+
+    if deepeval is not None:
+        summary = deepeval["summary"]
+        story.extend([Spacer(1, 6 * mm), Paragraph("LLM-judged (free-text)", styles["Heading2"])])
+        story.append(
+            Paragraph(
+                f"Judge model: {deepeval['judge_model']}. These scores apply only to narrative free-text grounding.",
+                body,
+            )
+        )
+
+        llm_summary_table = Table(
+            [
+                ["Metric", "Value"],
+                ["Faithfulness avg", f"{summary['avg_faithfulness']:.3f}"],
+                ["Faithfulness pass rate", f"{summary['faithfulness_pass_rate']:.3f}"],
+                ["Contextual precision avg", f"{summary['avg_contextual_precision']:.3f}"],
+                ["Contextual recall avg", f"{summary['avg_contextual_recall']:.3f}"],
+            ],
+            colWidths=[60 * mm, 40 * mm],
+        )
+        llm_summary_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ]
+            )
+        )
+        story.extend([llm_summary_table, Spacer(1, 4 * mm)])
+
+        llm_rows_data = [["Question", "Faithfulness", "Pass", "Ctx Precision", "Ctx Recall", "Judge reason"]]
+        for item in deepeval["rows"]:
+            llm_rows_data.append(
+                [
+                    Paragraph(_escape_html(item["question"]), body),
+                    f"{item['faithfulness_score']:.3f}",
+                    "yes" if item["faithfulness_passed"] else "no",
+                    f"{item['contextual_precision_score']:.3f}",
+                    f"{item['contextual_recall_score']:.3f}",
+                    Paragraph(_escape_html(item["faithfulness_reason"]), body),
+                ]
+            )
+
+        llm_detail_table = Table(llm_rows_data, colWidths=[42 * mm, 18 * mm, 10 * mm, 18 * mm, 18 * mm, 54 * mm])
+        llm_detail_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#374151")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            )
+        )
+        story.append(llm_detail_table)
+
     doc.build(story)
 
 
@@ -456,6 +787,8 @@ async def main() -> None:
     parser.add_argument("dataset", type=Path, help="JSONL file with evaluation cases")
     parser.add_argument("--html-out", type=Path, default=Path("reports/eval_report.html"), help="Where to write the HTML report")
     parser.add_argument("--pdf-out", type=Path, default=Path("reports/eval_report.pdf"), help="Where to write the PDF report")
+    parser.add_argument("--with-deepeval", action="store_true", help="Run optional LLM-judged free-text metrics (DeepEval)")
+    parser.add_argument("--faithfulness-threshold", type=float, default=0.7, help="Pass threshold for DeepEval faithfulness metric")
     args = parser.parse_args()
 
     cases = _load_cases(args.dataset)
@@ -466,12 +799,36 @@ async def main() -> None:
         raise SystemExit("ANTHROPIC_API_KEY is required for the grounded and baseline answer comparison")
 
     rows = [await _evaluate_case(case) for case in cases]
-    _print_summary(rows)
-    _render_html(args.html_out, rows)
-    _render_pdf(args.pdf_out, rows)
+    deepeval_results: dict[str, Any] | None = None
+    if args.with_deepeval:
+        if not settings.openai_api_key:
+            raise SystemExit("OPENAI_API_KEY is required when using --with-deepeval")
+        try:
+            import deepeval  # type: ignore  # noqa: F401
+        except Exception as exc:
+            raise SystemExit("DeepEval is not installed. Install backend requirements to use --with-deepeval.") from exc
+        deepeval_results = await _evaluate_with_deepeval(cases, args.faithfulness_threshold)
+
+    _print_summary(rows, deepeval=deepeval_results)
+    _render_html(args.html_out, rows, deepeval=deepeval_results)
+    _render_pdf(args.pdf_out, rows, deepeval=deepeval_results)
     print(f"HTML report written to: {args.html_out}")
     print(f"PDF report written to: {args.pdf_out}")
 
 
+def _run_async_entrypoint(coro: Any) -> Any:
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    _run_async_entrypoint(main())

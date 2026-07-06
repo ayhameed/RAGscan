@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "claude-sonnet-4-6"
+    eval_judge_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536
 

@@ -28,18 +28,18 @@ _ROUTER_PROMPT = ChatPromptTemplate.from_messages([
     ("human", "{query}"),
 ])
 
-_llm = None
+llm = None
 
 
 def _get_llm():
-    global _llm
-    if _llm is None:
-        _llm = ChatAnthropic(
+    global llm
+    if llm is None:
+        llm = ChatAnthropic(
             model=settings.llm_model,
             temperature=0.0,
             anthropic_api_key=settings.anthropic_api_key,
         )
-    return _llm
+    return llm
 
 
 async def route(query: str) -> Intent:

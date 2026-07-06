@@ -123,6 +123,14 @@ pytest tests/ -v --tb=short
 
 25 unit tests covering parsers, enrichment, scoring, NIST mapping, and agent routing.
 
+Optional LLM-judged faithfulness tests are marked `eval` and skipped by default:
+
+```bash
+cd backend
+source venv/bin/activate
+pytest -m eval -v
+```
+
 ## Risk score formula
 
 ```
@@ -234,6 +242,31 @@ cd backend
 source venv/bin/activate
 python ../scripts/evaluate_rag_metrics.py ../sample_data/eval_cases.jsonl --html-out ../reports/eval_report.html --pdf-out ../reports/eval_report.pdf
 ```
+
+Deterministic (default) metrics in the script are:
+
+- Retrieval precision@10
+- Citation accuracy
+- Hallucination rate
+- Mapping fidelity
+- Risk score correlation proxy
+
+Optional LLM-judged metrics (free-text only) are available via DeepEval and are **off by default**:
+
+```bash
+cd backend
+source venv/bin/activate
+EVAL_JUDGE_MODEL=gpt-4.1-mini python ../scripts/evaluate_rag_metrics.py ../sample_data/eval_cases.jsonl --with-deepeval --html-out ../reports/eval_report.html --pdf-out ../reports/eval_report.pdf
+```
+
+DeepEval is used only for narrative grounding quality (faithfulness/contextual precision/contextual recall). Structured checks remain deterministic.
+
+Judge-model guardrail:
+
+- Generator model uses Claude (`LLM_MODEL` / `settings.llm_model`).
+- DeepEval judge should use a **different model family** to reduce self-preference bias (set `EVAL_JUDGE_MODEL` to a GPT-4-class model).
+
+Caveat: LLM-judged metrics are slower, cost money, and can vary slightly across runs. Keep deterministic metrics as the primary baseline.
 
 The included `sample_data/eval_cases.jsonl` file is a template. Replace the placeholder IDs with labeled cases before using the output as a real benchmark.
 

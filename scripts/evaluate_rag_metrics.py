@@ -113,6 +113,27 @@ def _precision_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float
     return sum(1 for item in top10 if item in expected) / 10.0
 
 
+def _normalized_precision_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float:
+    if not retrieved_ids or not expected_ids:
+        return 0.0
+    top10 = retrieved_ids[:10]
+    expected = set(expected_ids)
+    hits = sum(1 for item in top10 if item in expected)
+    denom = min(10, len(expected))
+    if denom == 0:
+        return 0.0
+    return hits / denom
+
+
+def _recall_at_10(retrieved_ids: list[str], expected_ids: list[str]) -> float:
+    if not expected_ids:
+        return 0.0
+    top10 = retrieved_ids[:10]
+    expected = set(expected_ids)
+    hits = sum(1 for item in top10 if item in expected)
+    return hits / len(expected)
+
+
 def _citation_accuracy(answer: str, gold_ids: list[str]) -> float:
     cited = FINDING_CITATION_RE.findall(answer)
     if not cited:
@@ -234,6 +255,8 @@ async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
 
         grounded_metrics = {
             "precision_at_10": _precision_at_10(retrieved_ids, case.expected_finding_ids),
+            "normalized_precision_at_10": _normalized_precision_at_10(retrieved_ids, case.expected_finding_ids),
+            "recall_at_10": _recall_at_10(retrieved_ids, case.expected_finding_ids),
             "citation_accuracy": _citation_accuracy(grounded_text, case.gold_citation_ids),
             "hallucination_rate": _hallucination_rate(grounded_text, retrieved),
             "mapping_fidelity": _mapping_fidelity(retrieved, case.expected_controls, case.framework),
@@ -250,6 +273,8 @@ async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
 
 def _print_summary(rows: list[dict[str, Any]]) -> None:
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -271,6 +296,8 @@ def _print_summary(rows: list[dict[str, Any]]) -> None:
     print("RAGScan evaluation summary")
     print(f"Cases: {len(rows)}")
     print(f"Retrieval precision@10: {grounded_p10:.3f}")
+    print(f"Retrieval normalized precision@10: {grounded_np10:.3f}")
+    print(f"Retrieval recall@10: {grounded_r10:.3f}")
     print(f"Citation accuracy: {grounded_citation:.3f}")
     print(f"Hallucination rate: {grounded_hallucination:.3f}")
     print(f"NIST/ISO mapping fidelity: {grounded_mapping_fidelity:.3f}")
@@ -296,6 +323,8 @@ def _escape_html(text: str) -> str:
 def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -310,6 +339,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
             "<tr>"
             f"<td>{_escape_html(row['question'])}</td>"
             f"<td>{g['precision_at_10']:.3f}</td>"
+            f"<td>{g['normalized_precision_at_10']:.3f}</td>"
+            f"<td>{g['recall_at_10']:.3f}</td>"
             f"<td>{g['citation_accuracy']:.3f}</td>"
             f"<td>{g['hallucination_rate']:.3f}</td>"
             f"<td>{g['mapping_fidelity']:.3f}</td>"
@@ -328,7 +359,7 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
     body {{ font-family: Arial, sans-serif; margin: 32px; color: #111827; }}
     h1 {{ margin-bottom: 4px; }}
     .meta {{ color: #6b7280; margin-bottom: 18px; }}
-    .cards {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0 24px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; margin: 18px 0 24px; }}
     .card {{ border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; background: #f9fafb; }}
     .card .label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .06em; }}
     .card .value {{ font-size: 22px; font-weight: 700; margin-top: 4px; }}
@@ -343,6 +374,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
   <div class=\"meta\">Grounded RAG vs ungrounded baseline · {len(rows)} cases</div>
   <div class=\"cards\">
     <div class=\"card\"><div class=\"label\">Precision@10</div><div class=\"value\">{grounded_p10:.3f}</div></div>
+        <div class="card"><div class="label">Norm Precision@10</div><div class="value">{grounded_np10:.3f}</div></div>
+        <div class="card"><div class="label">Recall@10</div><div class="value">{grounded_r10:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Citation Accuracy</div><div class=\"value\">{grounded_citation:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Hallucination Rate</div><div class=\"value\">{grounded_hallucination:.3f}</div></div>
     <div class=\"card\"><div class=\"label\">Mapping Fidelity</div><div class=\"value\">{grounded_mapping_fidelity:.3f}</div></div>
@@ -353,6 +386,8 @@ def _render_html(path: Path, rows: list[dict[str, Any]]) -> None:
       <tr>
         <th>Question</th>
         <th>P@10</th>
+        <th>Norm P@10</th>
+        <th>R@10</th>
         <th>Citation Acc.</th>
         <th>Hallucination</th>
         <th>Mapping Fidelity</th>
@@ -384,6 +419,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
     )
 
     grounded_p10 = mean(row["grounded"]["precision_at_10"] for row in rows)
+    grounded_np10 = mean(row["grounded"]["normalized_precision_at_10"] for row in rows)
+    grounded_r10 = mean(row["grounded"]["recall_at_10"] for row in rows)
     grounded_citation = mean(row["grounded"]["citation_accuracy"] for row in rows)
     grounded_hallucination = mean(row["grounded"]["hallucination_rate"] for row in rows)
     grounded_mapping_fidelity = mean(row["grounded"]["mapping_fidelity"] for row in rows)
@@ -398,6 +435,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
         [
             ["Metric", "Value"],
             ["Precision@10", f"{grounded_p10:.3f}"],
+            ["Normalized Precision@10", f"{grounded_np10:.3f}"],
+            ["Recall@10", f"{grounded_r10:.3f}"],
             ["Citation Accuracy", f"{grounded_citation:.3f}"],
             ["Hallucination Rate", f"{grounded_hallucination:.3f}"],
             ["Mapping Fidelity", f"{grounded_mapping_fidelity:.3f}"],
@@ -417,7 +456,7 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
     )
     story.extend([summary_table, Spacer(1, 5 * mm)])
 
-    rows_data = [["Question", "P@10", "Citation", "Hallucination", "Mapping", "Risk proxy", "Baseline hallucination"]]
+    rows_data = [["Question", "P@10", "Norm P@10", "R@10", "Citation", "Hallucination", "Mapping", "Risk proxy", "Baseline hallucination"]]
     for row in rows:
         g = row["grounded"]
         b = row["baseline"]
@@ -426,6 +465,8 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
             [
                 Paragraph(_escape_html(row["question"]), body),
                 f"{g['precision_at_10']:.3f}",
+                f"{g['normalized_precision_at_10']:.3f}",
+                f"{g['recall_at_10']:.3f}",
                 f"{g['citation_accuracy']:.3f}",
                 f"{g['hallucination_rate']:.3f}",
                 f"{g['mapping_fidelity']:.3f}",
@@ -434,7 +475,7 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]]) -> None:
             ]
         )
 
-    detail_table = Table(rows_data, colWidths=[58 * mm, 14 * mm, 16 * mm, 18 * mm, 16 * mm, 20 * mm, 20 * mm])
+    detail_table = Table(rows_data, colWidths=[50 * mm, 12 * mm, 14 * mm, 12 * mm, 14 * mm, 16 * mm, 14 * mm, 16 * mm, 18 * mm])
     detail_table.setStyle(
         TableStyle(
             [

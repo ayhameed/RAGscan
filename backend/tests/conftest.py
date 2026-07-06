@@ -49,3 +49,18 @@ SAMPLE_OPENSCAP = b"""<?xml version="1.0"?>
     </rule-result>
   </TestResult>
 </Benchmark>"""
+
+
+def pytest_configure(config):
+  config.addinivalue_line("markers", "eval: slow/costly LLM-judged evaluation tests")
+
+
+def pytest_collection_modifyitems(config, items):
+  markexpr = (getattr(config.option, "markexpr", "") or "").strip()
+  if "eval" in markexpr:
+    return
+
+  skip_eval = pytest.mark.skip(reason="LLM-judged eval tests are opt-in; run with: pytest -m eval")
+  for item in items:
+    if item.get_closest_marker("eval"):
+      item.add_marker(skip_eval)

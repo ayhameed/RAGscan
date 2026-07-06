@@ -57,6 +57,7 @@ class EvalCase:
 
 
 def _sort_findings(findings: Iterable[Finding]) -> list[Finding]:
+    # Deterministic order: highest risk first, then UUID string.
     return sorted(
         findings,
         key=lambda item: (
@@ -134,7 +135,11 @@ def _generate_cases(findings: list[Finding], report_id: str, framework: str, max
         counts["kev"] += 1
 
     for severity in ("critical", "high"):
-        sev_findings = [item for item in findings if (item.severity_label or "").strip().lower() == severity]
+        sev_findings = [
+            item
+            for item in findings
+            if (item.severity_label or "").strip().lower() == severity
+        ]
         if sev_findings:
             matched_ids = _ids(sev_findings, cap=max_per_template)
             cases.append(_build_case(f"What are the {severity}-severity findings?", matched_ids, report_id, framework))
@@ -178,7 +183,9 @@ def _generate_cases(findings: list[Finding], report_id: str, framework: str, max
     if with_epss:
         top_epss = sorted(with_epss, key=lambda item: (-(item.epss_score or -1.0), str(item.id)))[:1]
         top_epss_id = [str(top_epss[0].id)]
-        cases.append(_build_case("Which finding has the highest EPSS exploit probability?", top_epss_id, report_id, framework))
+        cases.append(
+            _build_case("Which finding has the highest EPSS exploit probability?", top_epss_id, report_id, framework)
+        )
         counts["highest_epss"] += 1
 
     return cases, counts

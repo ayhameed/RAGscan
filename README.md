@@ -2,7 +2,7 @@
 
 Retrieval-augmented vulnerability intelligence and compliance gap analysis.
 
-RAGScan ingests structured scan data (Nessus XML, OpenSCAP XCCDF), enriches every finding with live threat intelligence from NVD, FIRST EPSS, and the CISA KEV catalog, computes a composite risk score, stores findings in a pgvector embedding store, and exposes a LangChain-orchestrated agent that answers natural-language questions using retrieved scan findings as the primary context. Optional NVD/EPSS internet context can also be supplied as secondary context to help explain or reinforce those findings, but it does not override the scan evidence. A Next.js dashboard provides a browser interface for importing scans, viewing risk scores, and querying the agent. Hallucination is treated as a first-class failure mode.
+RAGScan ingests XML scan data (Nessus, OpenSCAP XCCDF, and other XML schemas through a generic fallback parser), enriches every finding with live threat intelligence from NVD, FIRST EPSS, and the CISA KEV catalog, computes a composite risk score, stores findings in a pgvector embedding store, and exposes a LangChain-orchestrated agent that answers natural-language questions using retrieved scan findings as the primary context. Optional NVD/EPSS internet context can also be supplied as secondary context to help explain or reinforce those findings, but it does not override the scan evidence. A Next.js dashboard provides a browser interface for importing scans, viewing risk scores, and querying the agent. Hallucination is treated as a first-class failure mode.
 
 ## Architecture
 
@@ -66,7 +66,7 @@ python scripts/load_demo_data.py --url http://localhost:8000
 
 1. Open `http://localhost:3000` and register an account.
 2. If your account is pending, wait for an admin to approve it before login access is granted.
-3. Go to **Import** and upload a `.nessus` or OpenSCAP `.xml` file, or click **Load Demo Data**.
+3. Go to **Import** and upload an XML scan file (`.nessus`, OpenSCAP `.xml`, or other XML scanner outputs), or click **Load Demo Data**.
 4. Go to **Reports** to select an uploaded report and inspect scoped findings.
 5. Go to **Guide** to understand risk score interpretation and prioritization bands.
 6. Go to **Dashboard** for executive summary, live grounding metrics, compliance PDF export, and DeepEval PDF export.
@@ -100,7 +100,7 @@ Operational notes:
 
 ## Screen guide
 
-- **Landing (`/`)**: login/register and one-click **Load Demo Data** (after sign-in).
+- **Landing (`/`)**: login/register.
 - **Import (`/import`)**: drag-drop upload or demo load, plus upload log table.
 - **Reports (`/reports`)**: report-scoped findings and risk summary cards.
 - **Dashboard (`/dashboard`)**: summary cards, trend metrics, compliance export, DeepEval export.
@@ -118,7 +118,7 @@ Operational notes:
 | GET | `/auth/me` | Bearer | Return current user profile and access flags |
 | GET | `/auth/admin/users` | Bearer (admin) | List users for admin lifecycle management |
 | PATCH | `/auth/admin/users/{user_id}` | Bearer (admin) | Update `is_admin`, `is_approved`, `is_blocked` |
-| POST | `/ingest` | Bearer | Upload a Nessus or OpenSCAP file |
+| POST | `/ingest` | Bearer | Upload an XML scan file (known formats use dedicated parsers; unknown formats use generic fallback parsing) |
 | POST | `/ingest/demo` | Bearer | Ingest bundled demo files in one click |
 | GET | `/ingest/reports` | Bearer | List uploaded scan reports (file, uploader, timestamp, finding count) |
 | DELETE | `/ingest/reports/{report_id}` | Bearer | Delete an uploaded report and associated findings |
@@ -137,6 +137,13 @@ Operational notes:
 | GET | `/audit` | Bearer | Activity log (paginated: `page`, `page_size`) |
 | GET | `/health` | — | Liveness check |
 
+`POST /ingest` response includes parser metadata:
+
+- `detected_tool`: detector classification (for example `nessus`, `openscap`, `unknown_xml`).
+- `parser_used`: parser actually used (`nessus`, `openscap`, or `generic_xml`).
+- `fallback_used`: `true` when generic fallback parsing was used.
+- `parse_warnings`: non-fatal parser/fallback warnings.
+
 ## Running tests
 
 ```bash
@@ -146,7 +153,7 @@ pip install -r requirements.txt
 pytest tests/ -v --tb=short
 ```
 
-25 unit tests covering parsers, enrichment, scoring, NIST mapping, and agent routing.
+35 unit tests covering parsers, ingestion routing, enrichment, scoring, NIST mapping, and agent routing.
 
 Optional LLM-judged faithfulness tests are marked `eval` and skipped by default:
 
@@ -209,7 +216,7 @@ backend/
   app/
     api/routes/         auth, ingest, query, score, report, analyse, metrics, audit
     core/
-      ingestion/        Nessus + OpenSCAP XCCDF parsers (lxml)
+      ingestion/        tool detector, parser registry, Nessus/OpenSCAP parsers, generic XML fallback parser
       enrichment/       NVD, EPSS, CISA KEV clients with DB caching
       scoring/          composite risk score engine
       rag/              embedder, pgvector retriever, LangChain LCEL chain
@@ -220,7 +227,7 @@ backend/
     models/             ORM models (findings, embeddings, cache, gaps, reports, users)
     schemas/            Pydantic v2 request/response schemas
   alembic/              database migrations
-  tests/                25 unit tests
+  tests/                35 unit tests
 
 frontend/
   app/

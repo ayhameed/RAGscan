@@ -60,9 +60,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_cors_origins,
+    allow_origin_regex=settings.allowed_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-LLM-Provider", "X-LLM-Fallback", "X-LLM-Fallback-Reason"],
 )
 
 app.include_router(auth.router, prefix="/auth")

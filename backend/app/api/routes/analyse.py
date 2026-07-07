@@ -2,6 +2,7 @@ import uuid
 import subprocess
 import sys
 import tempfile
+import importlib.util
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_utils import require_auth
+from app.config import settings
 from app.core.agents.security_agent import analyse
 from app.core.rag.embedder import finding_to_text
 from app.db.session import get_db
@@ -31,6 +33,26 @@ async def download_deepeval_pdf(
     background_tasks: BackgroundTasks,
     _: User = Depends(require_auth),
 ):
+    fallback_forced = not settings.anthropic_api_key and bool(settings.github_models_api_key)
+
+    if importlib.util.find_spec("deepeval") is None:
+        raise HTTPException(
+            status_code=503,
+            detail="DeepEval package is not installed on this backend runtime",
+        )
+
+    if not settings.anthropic_api_key and not settings.github_models_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY is required for DeepEval export",
+        )
+
+    if not settings.openai_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="OPENAI_API_KEY is required for DeepEval judge model",
+        )
+
     repo_root = Path(__file__).resolve().parents[4]
     script_path = repo_root / "scripts" / "evaluate_rag_metrics.py"
     dataset_path = repo_root / "sample_data" / "eval_cases.jsonl"
@@ -76,10 +98,16 @@ async def download_deepeval_pdf(
 
     background_tasks.add_task(_safe_unlink, pdf_tmp.name)
     background_tasks.add_task(_safe_unlink, html_tmp.name)
+    headers = {
+        "X-LLM-Provider": "github-open-model" if fallback_forced else "anthropic",
+    }
+    if fallback_forced:
+        headers["X-LLM-Fallback"] = "github-open-model"
     return FileResponse(
         pdf_tmp.name,
         media_type="application/pdf",
         filename="ragscan_deepeval_report.pdf",
+        headers=headers,
     )
 
 

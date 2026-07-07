@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Nav from "@/components/Nav";
 import AuthGuard from "@/components/AuthGuard";
+import LlmProviderStatus from "@/components/LlmProviderStatus";
 import { api, ScoreSummary, UploadReport, MetricsTrendResponse } from "@/lib/api";
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -177,6 +178,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between gap-3 mb-6">
           <h2 className="text-xl font-semibold text-white">Dashboard</h2>
           <div className="flex items-center gap-2">
+            <LlmProviderStatus />
             <Link
               href="/guide"
               className="border border-[#cb156d] text-[#cb156d] hover:bg-[#cb156d]/10 text-sm font-medium px-4 py-2 rounded-lg transition-colors"

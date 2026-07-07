@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,9 +30,16 @@ def _framework_filtered_findings(findings: list[Finding], framework: str) -> lis
 @router.post("", response_model=ReportOut, status_code=201)
 async def generate_report(
     body: ReportRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_auth),
 ):
+    if not settings.anthropic_api_key and not settings.github_models_api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="No LLM provider configured. Set ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY.",
+        )
+
     if body.framework not in _VALID_FRAMEWORKS:
         raise HTTPException(status_code=422, detail=f"framework must be one of {_VALID_FRAMEWORKS}")
 
@@ -73,7 +80,19 @@ async def generate_report(
     framework_mapped_findings = _framework_filtered_findings(list(findings), body.framework)
     gaps = await compute_and_store_gaps(framework_mapped_findings, framework, db)
 
-    path = await build_report(list(findings), gaps, framework, db)
+    try:
+        path, fallback_used, active_provider = await build_report(list(findings), gaps, framework, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+            response.headers["X-LLM-Provider"] = active_provider
+            if fallback_used:
+                response.headers["X-LLM-Fallback"] = "github-open-model"
+
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to generate report narrative: {exc}",
+        ) from exc
 
     report = Report(report_type=body.framework, path=path)
     db.add(report)

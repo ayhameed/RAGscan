@@ -47,8 +47,6 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from langchain_anthropic import ChatAnthropic  # type: ignore
-from langchain_core.output_parsers import StrOutputParser  # type: ignore
 from langchain_core.prompts import ChatPromptTemplate  # type: ignore
 from reportlab.lib import colors  # type: ignore
 from reportlab.lib.pagesizes import A4  # type: ignore
@@ -59,6 +57,7 @@ from sqlalchemy import select  # type: ignore
 from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore
 
 from app.config import settings  # type: ignore
+from app.core.llm import invoke_text_with_fallback  # type: ignore
 from app.core.rag.chain import format_findings, query as grounded_answer  # type: ignore
 from app.core.rag.retriever import retrieve  # type: ignore
 from app.db.session import AsyncSessionLocal  # type: ignore
@@ -86,9 +85,6 @@ _UNGROUNDED_PROMPT = ChatPromptTemplate.from_messages(
         ("human", "Question: {question}"),
     ]
 )
-
-_ungrounded_chain = None
-
 
 @dataclass
 class EvalCase:
@@ -244,16 +240,9 @@ def _pearson(xs: list[float], ys: list[float]) -> float:
     return num / ((den_x ** 0.5) * (den_y ** 0.5))
 
 
-def _get_ungrounded_chain():
-    global _ungrounded_chain
-    if _ungrounded_chain is None:
-        llm = ChatAnthropic(
-            model=settings.llm_model,
-            temperature=0.1,
-            anthropic_api_key=settings.anthropic_api_key,
-        )
-        _ungrounded_chain = _UNGROUNDED_PROMPT | llm | StrOutputParser()
-    return _ungrounded_chain
+async def _ungrounded_answer(question: str) -> str:
+    result = await invoke_text_with_fallback(_UNGROUNDED_PROMPT, {"question": question})
+    return str(result.text)
 
 
 async def _fetch_scope(session: AsyncSession, report_ids: list[str]) -> list[str]:
@@ -421,7 +410,7 @@ async def _evaluate_case(case: EvalCase) -> dict[str, Any]:
         retrieved_ids = [str(item.get("id", "")) for item in retrieved if item.get("id")]
 
         grounded_text = await grounded_answer(case.question, retrieved)
-        ungrounded_text = await _get_ungrounded_chain().ainvoke({"question": case.question})
+        ungrounded_text = await _ungrounded_answer(case.question)
 
         grounded_metrics = {
             "precision_at_10": _precision_at_10(retrieved_ids, case.expected_finding_ids),

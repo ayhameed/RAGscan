@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_utils import require_auth
 from app.config import settings
-from app.core.agents.security_agent import analyse as security_analyse
+from app.core.agents.security_agent import analyse_with_meta as security_analyse_with_meta
 from app.core.agents.supervisor import Intent, route
-from app.core.rag.chain import query as general_query
+from app.core.rag.chain import query_with_meta as general_query_with_meta
 from app.core.rag.retriever import retrieve
 from app.db.session import get_db
 from app.models.models import AuditLog, ChatSession, Finding, ResponseMetric, ScanUpload, User
@@ -269,22 +269,23 @@ async def _load_session(db: AsyncSession, user_id: UUID, session_id: UUID | None
 
 
 _NO_LLM_MSG = (
-    "LLM query features require ANTHROPIC_API_KEY to be set. "
-    "Add it to backend/.env and restart the server. "
-    "The /score and /ingest endpoints are fully functional without an API key."
+    "LLM query features require a configured provider. "
+    "Set ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY and restart the backend. "
+    "The /score and /ingest endpoints are fully functional without LLM keys."
 )
 
 
 @router.post("", response_model=QueryResponse)
 async def chat(
     body: QueryRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_auth),
 ):
     if not body.question.strip():
         raise HTTPException(status_code=422, detail="Question cannot be empty")
 
-    if not settings.anthropic_api_key:
+    if not settings.anthropic_api_key and not settings.github_models_api_key:
         return QueryResponse(
             answer=_NO_LLM_MSG,
             sources=[],
@@ -383,9 +384,14 @@ async def chat(
     try:
         secondary_context = await _fetch_secondary_context(findings) if body.include_internet_context else None
         if intent == Intent.SECURITY:
-            answer = await security_analyse(body.question, findings, secondary_context)
+            llm_result = await security_analyse_with_meta(body.question, findings, secondary_context)
         else:
-            answer = await general_query(body.question, findings, secondary_context)
+            llm_result = await general_query_with_meta(body.question, findings, secondary_context)
+        answer = llm_result.text
+        response.headers["X-LLM-Provider"] = llm_result.provider
+        if llm_result.fallback_used:
+            response.headers["X-LLM-Fallback"] = llm_result.provider
+            response.headers["X-LLM-Fallback-Reason"] = llm_result.fallback_reason or "unspecified"
     except Exception as exc:
         logger.error("LLM call failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc

@@ -28,7 +28,8 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "claude-sonnet-4-6"
-    github_fallback_model: str = "meta/Llama-3.3-70B-Instruct"
+    github_fallback_model: str = "openai/gpt-oss-20b"
+    github_fallback_models: str = ""
     github_models_api_key: str = ""
     github_models_base_url: str = "https://models.inference.ai.azure.com"
     eval_judge_model: str = "gpt-4.1-mini"

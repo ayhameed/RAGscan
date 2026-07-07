@@ -20,9 +20,15 @@ Figure 2. RAGScan consumption paths
 - Docker Desktop (or Docker Engine + Compose plugin)
 
 **API keys**
-- `ANTHROPIC_API_KEY` — Claude (required for `/query` and `/report`)
 - `OPENAI_API_KEY` — text-embedding-3-small (required for RAG retrieval)
+- `ANTHROPIC_API_KEY` — primary LLM for chat/report/deepeval generation
+- `GITHUB_MODELS_API_KEY` — optional fallback LLM provider (OpenAI-compatible endpoint)
 - `NVD_API_KEY` — optional; raises NVD rate limit from 5 to 50 req/30 s
+
+For LLM-powered endpoints (`/query`, `/report`, `/analyse/deepeval/download`), configure at least one text-generation provider:
+
+- Primary: `ANTHROPIC_API_KEY`
+- Fallback: `GITHUB_MODELS_API_KEY`
 
 > The `/ingest` and `/score` endpoints are fully functional without any API keys — enrichment via NVD, EPSS, and CISA KEV uses only HTTP calls.
 
@@ -70,7 +76,7 @@ python scripts/load_demo_data.py --url http://localhost:8000
 4. Go to **Reports** to select an uploaded report and inspect scoped findings.
 5. Go to **Guide** to understand risk score interpretation and prioritization bands.
 6. Go to **Dashboard** for executive summary, live grounding metrics, compliance PDF export, and DeepEval PDF export.
-7. Go to **Chat** to ask natural-language questions about your findings (requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`).
+7. Go to **Chat** to ask natural-language questions about your findings (requires `OPENAI_API_KEY` and at least one generation provider: `ANTHROPIC_API_KEY` or `GITHUB_MODELS_API_KEY`).
 8. Go to **Logs** to review activity history.
 9. If you are an admin, use **Admin** to approve users, grant/revoke admin rights, and block/unblock accounts.
 
@@ -109,6 +115,12 @@ Operational notes:
 - **Guide (`/guide`)**: risk formula and severity interpretation.
 - **Admin (`/admin`)**: user lifecycle controls (admin-only).
 
+LLM provider status badge:
+
+- Dashboard and Chat show the active provider state.
+- `Primary: Anthropic` appears when primary model calls succeed.
+- `Fallback: ...` appears when quota/credit fallback routes requests to GitHub Models.
+
 ## API reference
 
 | Method | Path | Auth | Description |
@@ -137,6 +149,12 @@ Operational notes:
 | GET | `/audit` | Bearer | Activity log (paginated: `page`, `page_size`) |
 | GET | `/health` | — | Liveness check |
 
+LLM routes expose provider headers for UI status tracking:
+
+- `X-LLM-Provider`: active provider (`anthropic` or `github-open-model:<model-id>`)
+- `X-LLM-Fallback`: present when fallback was used
+- `X-LLM-Fallback-Reason`: fallback trigger reason
+
 `POST /ingest` response includes parser metadata:
 
 - `detected_tool`: detector classification (for example `nessus`, `openscap`, `unknown_xml`).
@@ -162,6 +180,11 @@ source venv/bin/activate
 cd backend
 pytest -m eval -v
 ```
+
+DeepEval export/runtime note:
+
+- `deepeval==4.0.7` is included in backend requirements.
+- DeepEval still requires `OPENAI_API_KEY` for judge metrics.
 
 ## Risk score formula
 
@@ -266,6 +289,10 @@ Dockerfile
 | `DATABASE_URL` | Yes | `postgresql+asyncpg://user:pass@host/db` |
 | `JWT_SECRET` | Yes | Random 256-bit string for JWT HS256 signing |
 | `ANTHROPIC_API_KEY` | For chat/report | Claude LLM (claude-sonnet-4-6 by default) |
+| `GITHUB_MODELS_API_KEY` | Optional fallback | GitHub Models key for OpenAI-compatible fallback generation |
+| `GITHUB_FALLBACK_MODEL` | Optional | Primary fallback model ID (default: `openai/gpt-oss-20b`) |
+| `GITHUB_FALLBACK_MODELS` | Optional | Comma-separated backup model IDs tried on `unknown_model` errors |
+| `GITHUB_MODELS_BASE_URL` | Optional | OpenAI-compatible endpoint base URL (default: `https://models.inference.ai.azure.com`) |
 | `OPENAI_API_KEY` | For chat/report | Embeddings (text-embedding-3-small, 1536 dims) |
 | `NVD_API_KEY` | No | Raises NVD rate limit from 5 to 50 req/30 s |
 | `ENVIRONMENT` | No | `dev` (permissive CORS) or `prod` |

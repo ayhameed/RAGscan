@@ -58,6 +58,9 @@ class Settings(BaseSettings):
             if key == "sslmode":
                 query_items.append(("ssl", query_value))
                 changed = True
+            elif key == "channel_binding":
+                # asyncpg does not accept channel_binding in connect kwargs
+                changed = True
             else:
                 query_items.append((key, query_value))
 

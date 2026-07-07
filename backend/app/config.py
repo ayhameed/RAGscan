@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     github_fallback_model: str = "openai/gpt-oss-20b"
     github_fallback_models: str = ""
     github_models_api_key: str = ""
-    github_models_base_url: str = "https://models.inference.ai.azure.com"
+    github_models_base_url: str = "https://models.github.ai/inference"
     eval_judge_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536

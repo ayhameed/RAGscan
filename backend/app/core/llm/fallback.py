@@ -71,6 +71,14 @@ def _fallback_model_candidates() -> list[str]:
             if model.strip()
         )
 
+    # Built-in defaults for Groq's OpenAI-compatible endpoint, always appended as a
+    # last resort so an empty FALLBACK_LLM_MODEL(S) env var can never zero out the list.
+    candidates.extend([
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile",
+    ])
+
     deduped: list[str] = []
     seen: set[str] = set()
     for item in candidates:

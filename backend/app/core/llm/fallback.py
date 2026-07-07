@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import httpx
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.output_parsers import StrOutputParser
@@ -88,9 +89,70 @@ def _github_model_candidates() -> list[str]:
     return deduped
 
 
+async def _discover_endpoint_models() -> list[str]:
+    if not settings.github_models_api_key:
+        return []
+
+    base = settings.github_models_base_url.rstrip("/")
+    url = f"{base}/models"
+    headers = {
+        "Authorization": f"Bearer {settings.github_models_api_key}",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            return []
+        data = res.json()
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return []
+        ids: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            mid = str(row.get("id") or "").strip()
+            if mid:
+                ids.append(mid)
+        return ids
+    except Exception:
+        return []
+
+
+def _rank_discovered_models(models: list[str]) -> list[str]:
+    if not models:
+        return []
+
+    preferred_markers = (
+        "gpt-oss",
+        "llama",
+        "mistral",
+        "qwen",
+        "deepseek",
+        "gemma",
+    )
+
+    ranked = sorted(
+        models,
+        key=lambda model: (
+            0 if any(marker in model.lower() for marker in preferred_markers) else 1,
+            len(model),
+            model.lower(),
+        ),
+    )
+    return ranked
+
+
 async def _invoke_github_with_model_fallback(prompt: ChatPromptTemplate, payload: dict) -> tuple[str, str]:
     last_error: Exception | None = None
-    for model in _github_model_candidates():
+    candidates = _github_model_candidates()
+    discovered = _rank_discovered_models(await _discover_endpoint_models())
+    for model in discovered:
+        if model.lower() not in {item.lower() for item in candidates}:
+            candidates.append(model)
+
+    for model in candidates:
         try:
             chain = _github_open_chain(prompt, model)
             if chain is None:

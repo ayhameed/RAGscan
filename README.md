@@ -292,7 +292,7 @@ Dockerfile
 | `GITHUB_MODELS_API_KEY` | Optional fallback | GitHub Models key for OpenAI-compatible fallback generation |
 | `GITHUB_FALLBACK_MODEL` | Optional | Primary fallback model ID (default: `openai/gpt-oss-20b`) |
 | `GITHUB_FALLBACK_MODELS` | Optional | Comma-separated backup model IDs tried on `unknown_model` errors |
-| `GITHUB_MODELS_BASE_URL` | Optional | OpenAI-compatible endpoint base URL (default: `https://models.inference.ai.azure.com`) |
+| `GITHUB_MODELS_BASE_URL` | Optional | OpenAI-compatible endpoint base URL (default: `https://models.github.ai/inference`) |
 | `OPENAI_API_KEY` | For chat/report | Embeddings (text-embedding-3-small, 1536 dims) |
 | `NVD_API_KEY` | No | Raises NVD rate limit from 5 to 50 req/30 s |
 | `ENVIRONMENT` | No | `dev` (permissive CORS) or `prod` |

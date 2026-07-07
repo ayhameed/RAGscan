@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { clearToken } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { api, clearToken, getCurrentUser } from "@/lib/api";
 
 const links = [
   { href: "/reports",   label: "Reports" },
@@ -15,6 +16,17 @@ const links = [
 export default function Nav() {
   const path = usePathname();
   const router = useRouter();
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => getCurrentUser()?.is_admin ?? false);
+
+  useEffect(() => {
+    if (getCurrentUser()) return;
+    api.me().then((me) => setIsAdmin(me.is_admin)).catch(() => setIsAdmin(false));
+  }, []);
+
+  const navLinks = useMemo(() => {
+    if (!isAdmin) return links;
+    return [...links, { href: "/admin", label: "Admin" }];
+  }, [isAdmin]);
 
   function logout() {
     clearToken();
@@ -24,7 +36,7 @@ export default function Nav() {
   return (
     <nav className="bg-[rgba(34,17,38,0.82)] backdrop-blur border-b border-white/10 text-white flex items-center gap-6 px-6 py-3 text-sm font-medium">
       <span className="text-white font-bold text-base mr-4 tracking-wide">RAGScan</span>
-      {links.map(({ href, label }) => (
+      {navLinks.map(({ href, label }) => (
         <Link
           key={href}
           href={href}

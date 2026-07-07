@@ -52,4 +52,14 @@ async def require_auth(
     user = await db.get(User, uuid.UUID(payload["sub"]))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if user.is_blocked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account blocked")
+    if not user.is_approved:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account pending admin approval")
+    return user
+
+
+async def require_admin(user: User = Depends(require_auth)) -> User:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user

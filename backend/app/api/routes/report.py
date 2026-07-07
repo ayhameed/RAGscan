@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth_utils import require_auth
+from app.config import settings
 from app.core.nist.mapper import get_controls
 from app.core.nist.mapper import compute_and_store_gaps
 from app.core.reports.builder import build_report
@@ -85,14 +86,14 @@ async def generate_report(
     except HTTPException:
         raise
     except Exception as exc:
-            response.headers["X-LLM-Provider"] = active_provider
-            if fallback_used:
-                response.headers["X-LLM-Fallback"] = "github-open-model"
-
         raise HTTPException(
             status_code=502,
             detail=f"Failed to generate report narrative: {exc}",
         ) from exc
+
+    response.headers["X-LLM-Provider"] = active_provider
+    if fallback_used:
+        response.headers["X-LLM-Fallback"] = "github-open-model"
 
     report = Report(report_type=body.framework, path=path)
     db.add(report)

@@ -31,16 +31,16 @@ async def init_db() -> None:
               END IF;
             END $$;
         """))
-          await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
-          await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE"))
-          await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE"))
-          await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ"))
-          await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMPTZ"))
-          await conn.execute(text("UPDATE users SET is_approved = TRUE WHERE is_approved IS DISTINCT FROM TRUE"))
-          await conn.execute(text("""
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT TRUE"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMPTZ"))
+        await conn.execute(text("UPDATE users SET is_approved = TRUE WHERE is_approved IS DISTINCT FROM TRUE"))
+        await conn.execute(text("""
             UPDATE users
             SET is_admin = TRUE,
               is_approved = TRUE,
               approved_at = COALESCE(approved_at, NOW())
             WHERE lower(email) = 'hameedyunusa@outlook.com'
-          """))
+        """))

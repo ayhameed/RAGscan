@@ -65,11 +65,49 @@ python scripts/load_demo_data.py --url http://localhost:8000
 ## Using the application
 
 1. Open `http://localhost:3000` and register an account.
-2. Go to **Import** and upload a `.nessus` or OpenSCAP `.xml` file.
-3. Go to **Reports** to select an uploaded report and inspect scoped findings.
-4. Go to **Guide** to understand risk score interpretation and prioritization bands.
-5. Go to **Dashboard** for executive summary and to export framework-matched compliance PDFs.
-6. Go to **Chat** to ask natural-language questions about your findings (requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`).
+2. If your account is pending, wait for an admin to approve it before login access is granted.
+3. Go to **Import** and upload a `.nessus` or OpenSCAP `.xml` file, or click **Load Demo Data**.
+4. Go to **Reports** to select an uploaded report and inspect scoped findings.
+5. Go to **Guide** to understand risk score interpretation and prioritization bands.
+6. Go to **Dashboard** for executive summary, live grounding metrics, compliance PDF export, and DeepEval PDF export.
+7. Go to **Chat** to ask natural-language questions about your findings (requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`).
+8. Go to **Logs** to review activity history.
+9. If you are an admin, use **Admin** to approve users, grant/revoke admin rights, and block/unblock accounts.
+
+## Admin usage
+
+RAGScan now uses approval-based access control.
+
+- New registrations are created as `pending approval`.
+- Blocked users cannot log in.
+- Existing users are backfilled as approved during migration/init.
+- The seeded admin account is `hameedyunusa@outlook.com`.
+
+Admin workflow:
+
+1. Sign in as an admin user.
+2. Open **Admin** (`/admin`).
+3. Review users list.
+4. Click **Approve** to allow login.
+5. Click **Make Admin** to grant admin rights.
+6. Click **Block** to disable account access.
+
+Operational notes:
+
+- Non-admin users only see their own audit logs.
+- Admin users can see all logs.
+- Admins cannot block themselves or remove their own admin role.
+
+## Screen guide
+
+- **Landing (`/`)**: login/register and one-click **Load Demo Data** (after sign-in).
+- **Import (`/import`)**: drag-drop upload or demo load, plus upload log table.
+- **Reports (`/reports`)**: report-scoped findings and risk summary cards.
+- **Dashboard (`/dashboard`)**: summary cards, trend metrics, compliance export, DeepEval export.
+- **Chat (`/chat`)**: scoped conversational analysis with citations, metrics, session export.
+- **Logs (`/logs`)**: paginated activity log.
+- **Guide (`/guide`)**: risk formula and severity interpretation.
+- **Admin (`/admin`)**: user lifecycle controls (admin-only).
 
 ## API reference
 
@@ -77,7 +115,11 @@ python scripts/load_demo_data.py --url http://localhost:8000
 |--------|------|------|-------------|
 | POST | `/auth/register` | — | Register a user |
 | POST | `/auth/login` | — | Obtain a JWT |
+| GET | `/auth/me` | Bearer | Return current user profile and access flags |
+| GET | `/auth/admin/users` | Bearer (admin) | List users for admin lifecycle management |
+| PATCH | `/auth/admin/users/{user_id}` | Bearer (admin) | Update `is_admin`, `is_approved`, `is_blocked` |
 | POST | `/ingest` | Bearer | Upload a Nessus or OpenSCAP file |
+| POST | `/ingest/demo` | Bearer | Ingest bundled demo files in one click |
 | GET | `/ingest/reports` | Bearer | List uploaded scan reports (file, uploader, timestamp, finding count) |
 | DELETE | `/ingest/reports/{report_id}` | Bearer | Delete an uploaded report and associated findings |
 | DELETE | `/ingest/reports` | Bearer | Purge all uploaded reports and associated findings for current user |
@@ -87,6 +129,7 @@ python scripts/load_demo_data.py --url http://localhost:8000
 | GET | `/query/sessions/{session_id}/download` | Bearer | Download conversation transcript as PDF |
 | DELETE | `/query/sessions/{session_id}` | Bearer | Delete a stored chat session |
 | GET | `/analyse/{id}` | Bearer | Deep analysis of a single finding |
+| GET | `/analyse/deepeval/download` | Bearer | Generate and download DeepEval PDF on-demand (temp file) |
 | POST | `/report` | Bearer | Generate NIST CSF or ISO 27001 gap report PDF |
 | GET | `/report/{id}/download` | Bearer | Download generated report |
 | GET | `/metrics/overview` | Bearer | Scope-aware average query grounding metrics |
@@ -164,7 +207,7 @@ CWE IDs are mapped to NIST CSF controls and ISO 27001:2022 controls via a static
 ```
 backend/
   app/
-    api/routes/         auth, ingest, query, score, report, analyse
+    api/routes/         auth, ingest, query, score, report, analyse, metrics, audit
     core/
       ingestion/        Nessus + OpenSCAP XCCDF parsers (lxml)
       enrichment/       NVD, EPSS, CISA KEV clients with DB caching
@@ -182,8 +225,12 @@ backend/
 frontend/
   app/
     page.tsx            login / register
+    admin/              user approval/admin/block management
     dashboard/          risk stat cards + sortable findings table
     import/             drag-and-drop scan file upload
+    logs/               audit log viewer
+    reports/            report-scoped findings explorer
+    guide/              risk formula and interpretation
     chat/               natural-language query interface with citations
   components/
     Nav.tsx             navigation bar
@@ -193,7 +240,16 @@ frontend/
 
 scripts/
   load_demo_data.py     seeds dev environment from DefectDojo sample scan
+  evaluate_rag_metrics.py deterministic + optional DeepEval benchmark runner
+
+sample_data/
+  eval_cases.jsonl      evaluation dataset template
+
+reports/
+  evaluations/          generated evaluation HTML/PDF artifacts
+
 docker-compose.yml
+Dockerfile
 ```
 
 ## Environment variables

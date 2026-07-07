@@ -270,7 +270,7 @@ async def _load_session(db: AsyncSession, user_id: UUID, session_id: UUID | None
 
 _NO_LLM_MSG = (
     "LLM query features require a configured provider. "
-    "Set ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY and restart the backend. "
+    "Set ANTHROPIC_API_KEY or FALLBACK_LLM_API_KEY and restart the backend. "
     "The /score and /ingest endpoints are fully functional without LLM keys."
 )
 
@@ -285,7 +285,7 @@ async def chat(
     if not body.question.strip():
         raise HTTPException(status_code=422, detail="Question cannot be empty")
 
-    if not settings.anthropic_api_key and not settings.github_models_api_key:
+    if not settings.anthropic_api_key and not settings.fallback_llm_api_key:
         return QueryResponse(
             answer=_NO_LLM_MSG,
             sources=[],

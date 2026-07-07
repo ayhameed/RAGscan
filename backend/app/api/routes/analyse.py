@@ -33,7 +33,7 @@ async def download_deepeval_pdf(
     background_tasks: BackgroundTasks,
     _: User = Depends(require_auth),
 ):
-    fallback_forced = not settings.anthropic_api_key and bool(settings.github_models_api_key)
+    fallback_forced = not settings.anthropic_api_key and bool(settings.fallback_llm_api_key)
 
     if importlib.util.find_spec("deepeval") is None:
         raise HTTPException(
@@ -41,10 +41,10 @@ async def download_deepeval_pdf(
             detail="DeepEval package is not installed on this backend runtime",
         )
 
-    if not settings.anthropic_api_key and not settings.github_models_api_key:
+    if not settings.anthropic_api_key and not settings.fallback_llm_api_key:
         raise HTTPException(
             status_code=503,
-            detail="ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY is required for DeepEval export",
+            detail="ANTHROPIC_API_KEY or FALLBACK_LLM_API_KEY is required for DeepEval export",
         )
 
     if not settings.openai_api_key:
@@ -99,10 +99,10 @@ async def download_deepeval_pdf(
     background_tasks.add_task(_safe_unlink, pdf_tmp.name)
     background_tasks.add_task(_safe_unlink, html_tmp.name)
     headers = {
-        "X-LLM-Provider": "github-open-model" if fallback_forced else "anthropic",
+        "X-LLM-Provider": "fallback-llm" if fallback_forced else "anthropic",
     }
     if fallback_forced:
-        headers["X-LLM-Fallback"] = "github-open-model"
+        headers["X-LLM-Fallback"] = "fallback-llm"
     return FileResponse(
         pdf_tmp.name,
         media_type="application/pdf",

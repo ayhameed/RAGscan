@@ -11,7 +11,7 @@ function maybeNotifyFallback(res: Response) {
   const fallback = res.headers.get("x-llm-fallback");
   if (fallback && !fallbackPopupShown) {
     fallbackPopupShown = true;
-    notify("Primary model credits/quota were exhausted. Switched to GitHub open model fallback.", "warning");
+    notify("Primary model credits/quota were exhausted. Switched to fallback LLM provider.", "warning");
   }
 }
 

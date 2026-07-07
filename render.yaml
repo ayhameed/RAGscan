@@ -23,11 +23,13 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: GITHUB_MODELS_API_KEY
+      - key: FALLBACK_LLM_API_KEY
         sync: false
-      - key: GITHUB_FALLBACK_MODEL
+      - key: FALLBACK_LLM_MODEL
         sync: false
-      - key: GITHUB_MODELS_BASE_URL
+      - key: FALLBACK_LLM_MODELS
+        sync: false
+      - key: FALLBACK_LLM_BASE_URL
         sync: false
       - key: NVD_API_KEY
         sync: false

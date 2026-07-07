@@ -6,12 +6,12 @@ const LLM_PROVIDER_KEY = "ragscan_last_llm_provider";
 
 function labelFor(provider: string): string {
   const val = provider.toLowerCase();
-  if (val.includes("github")) {
+  if (val.includes("fallback")) {
     const parts = provider.split(":");
     if (parts.length > 1 && parts[1].trim()) {
       return `Fallback: ${parts[1].trim()}`;
     }
-    return "Fallback: GitHub Open Model";
+    return "Fallback: Open Model";
   }
   if (val.includes("anthropic")) return "Primary: Anthropic";
   if (val) return `Provider: ${provider}`;
@@ -20,7 +20,7 @@ function labelFor(provider: string): string {
 
 function classFor(provider: string): string {
   const val = provider.toLowerCase();
-  if (val.includes("github")) return "border-amber-300 bg-amber-50 text-amber-800";
+  if (val.includes("fallback")) return "border-amber-300 bg-amber-50 text-amber-800";
   if (val.includes("anthropic")) return "border-emerald-300 bg-emerald-50 text-emerald-800";
   return "border-slate-300 bg-slate-50 text-slate-700";
 }

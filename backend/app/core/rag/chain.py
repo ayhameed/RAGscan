@@ -7,11 +7,9 @@ Temperature = 0.1 for deterministic, auditable outputs.
 """
 import re
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.config import settings
+from app.core.llm import LLMTextResult, invoke_text_with_fallback
 from app.core.nist.mapper import get_controls
 
 SYSTEM_PROMPT = """You are RAGScan, a security intelligence assistant.
@@ -35,9 +33,6 @@ prompt = ChatPromptTemplate.from_messages([
     ("human", "Findings:\n{context}\n\nSupplemental context:\n{supplemental_context}\n\nQuestion: {question}"),
 ])
 
-_chain = None
-
-
 def _clean_answer(text: str) -> str:
     cleaned = text.strip()
     cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
@@ -46,18 +41,6 @@ def _clean_answer(text: str) -> str:
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
-
-
-def _get_chain():
-    global _chain
-    if _chain is None:
-        llm = ChatAnthropic(
-            model=settings.llm_model,
-            temperature=0.1,
-            anthropic_api_key=settings.anthropic_api_key,
-        )
-        _chain = prompt | llm | StrOutputParser()
-    return _chain
 
 
 def format_findings(findings: list[dict]) -> str:
@@ -87,12 +70,19 @@ def format_findings(findings: list[dict]) -> str:
 
 
 async def query(question: str, findings: list[dict], supplemental_context: str | None = None) -> str:
+    result = await query_with_meta(question, findings, supplemental_context)
+    return result.text
+
+
+async def query_with_meta(question: str, findings: list[dict], supplemental_context: str | None = None) -> LLMTextResult:
     context = format_findings(findings)
-    response = await _get_chain().ainvoke(
+    response = await invoke_text_with_fallback(
+        prompt,
         {
             "context": context,
             "supplemental_context": supplemental_context or "None.",
             "question": question,
         }
     )
-    return _clean_answer(response)
+    response.text = _clean_answer(response.text)
+    return response

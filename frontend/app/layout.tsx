@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
+import NotificationToast from "@/components/NotificationToast";
 import "./globals.css";
 
 const poppins = Poppins({
@@ -24,6 +25,7 @@ export default function RootLayout({
       className={`${poppins.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <NotificationToast />
         <div className="flex-1">{children}</div>
         <footer className="border-t border-white/10 bg-[rgba(34,17,38,0.82)] text-white/70 text-xs px-6 py-3 text-center">
           All rights reserved. See Repo: https://github.com/ayhameed/RAGscan

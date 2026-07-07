@@ -1,4 +1,26 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+let fallbackPopupShown = false;
+const LLM_PROVIDER_KEY = "ragscan_last_llm_provider";
+
+function notify(message: string, type: "info" | "warning" | "error" = "info") {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("ragscan-notify", { detail: { message, type } }));
+}
+
+function maybeNotifyFallback(res: Response) {
+  const fallback = res.headers.get("x-llm-fallback");
+  if (fallback && !fallbackPopupShown) {
+    fallbackPopupShown = true;
+    notify("Primary model credits/quota were exhausted. Switched to GitHub open model fallback.", "warning");
+  }
+}
+
+function updateLlmProviderStatus(res: Response) {
+  const provider = (res.headers.get("x-llm-provider") || "").trim();
+  if (!provider || typeof window === "undefined") return;
+  localStorage.setItem(LLM_PROVIDER_KEY, provider);
+  window.dispatchEvent(new CustomEvent("ragscan-llm-provider", { detail: { provider } }));
+}
 
 function baseVariants(base: string): string[] {
   const variants = [base];
@@ -83,6 +105,9 @@ async function downloadPdf(path: string, filename: string): Promise<void> {
     throw new Error(text || `HTTP ${res.status}`);
   }
 
+  maybeNotifyFallback(res);
+  updateLlmProviderStatus(res);
+
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -116,6 +141,8 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(text || `HTTP ${res.status}`);
   }
+  maybeNotifyFallback(res);
+  updateLlmProviderStatus(res);
   return res.json() as Promise<T>;
 }
 

@@ -19,7 +19,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
 )
 
-from app.core.agents.reporting_agent import write_executive_summary, write_remediation
+from app.core.agents.reporting_agent import write_executive_summary_with_meta, write_remediation_with_meta
 from app.core.nist.mapper import compute_and_store_gaps, get_controls
 from app.models.models import Finding
 
@@ -81,7 +81,7 @@ async def build_report(
     gaps: dict[str, list[str]],
     framework: Framework,
     session,
-) -> str:
+) -> tuple[str, bool, str]:
     REPORTS_DIR.mkdir(exist_ok=True)
     report_id = uuid.uuid4()
     path = REPORTS_DIR / f"{framework}_{report_id}.pdf"
@@ -104,11 +104,14 @@ async def build_report(
         f"{ctrl}: {len(fids)} finding(s)" for ctrl, fids in sorted(gaps.items())
     )
 
-    exec_summary = await write_executive_summary(
+    exec_summary_result = await write_executive_summary_with_meta(
         framework=_FRAMEWORK_LABELS.get(framework, framework),
         gap_summary=gap_summary,
         stats=stats,
     )
+    fallback_used = exec_summary_result.fallback_used
+    active_provider = exec_summary_result.provider
+    exec_summary = exec_summary_result.text
     exec_summary = _clean_llm_text(exec_summary)
 
     doc = SimpleDocTemplate(
@@ -209,12 +212,16 @@ async def build_report(
             f"[{f.id}] {f.title} | {f.cve_id or 'N/A'} | Risk: {f.risk_score}"
             for f in ctrl_findings[:5]
         )
-        narrative = await write_remediation(
+        remediation_result = await write_remediation_with_meta(
             framework=_FRAMEWORK_LABELS.get(framework, framework),
             control_id=ctrl_id,
             control_desc=ctrl_desc,
             findings_text=findings_text,
         )
+        fallback_used = fallback_used or remediation_result.fallback_used
+        if remediation_result.fallback_used or active_provider == "anthropic":
+            active_provider = remediation_result.provider
+        narrative = remediation_result.text
         narrative = _clean_llm_text(narrative)
         story.append(Spacer(1, 3 * mm))
         story.append(Paragraph("Remediation Guidance", h2_style))
@@ -222,4 +229,4 @@ async def build_report(
         story.append(Spacer(1, 4 * mm))
 
     doc.build(story)
-    return str(path)
+    return str(path), fallback_used, active_provider

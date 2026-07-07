@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, FormEvent } from "react";
 import Nav from "@/components/Nav";
 import AuthGuard from "@/components/AuthGuard";
+import LlmProviderStatus from "@/components/LlmProviderStatus";
 import { api, QueryResponse, UploadReport, Finding, QueryMetrics } from "@/lib/api";
 
 interface Message {
@@ -282,6 +283,7 @@ export default function ChatPage() {
               </div>
             </div>
             <div className="text-xs text-white/70 flex flex-col items-end gap-2">
+              <LlmProviderStatus />
               <span>
                 {selectedFindingIds.length > 0
                   ? `${selectedFindingIds.length} individual findings selected`

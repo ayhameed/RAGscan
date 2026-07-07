@@ -4,11 +4,9 @@ Strictly cites finding IDs and CVEs. No speculation beyond retrieved data.
 """
 import re
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.config import settings
+from app.core.llm import LLMTextResult, invoke_text_with_fallback
 from app.core.rag.chain import format_findings
 
 _SECURITY_PROMPT = ChatPromptTemplate.from_messages([
@@ -38,10 +36,6 @@ Rules:
     ("human", "Findings:\n{context}\n\nSupplemental context:\n{supplemental_context}\n\nQuestion: {question}"),
 ])
 
-_llm = None
-_chain = None
-
-
 def _clean_answer(text: str) -> str:
     cleaned = text.strip()
     cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
@@ -52,25 +46,20 @@ def _clean_answer(text: str) -> str:
     return cleaned.strip()
 
 
-def _get_chain():
-    global _llm, _chain
-    if _chain is None:
-        _llm = ChatAnthropic(
-            model=settings.llm_model,
-            temperature=0.1,
-            anthropic_api_key=settings.anthropic_api_key,
-        )
-        _chain = _SECURITY_PROMPT | _llm | StrOutputParser()
-    return _chain
-
-
 async def analyse(question: str, findings: list[dict], supplemental_context: str | None = None) -> str:
+    result = await analyse_with_meta(question, findings, supplemental_context)
+    return result.text
+
+
+async def analyse_with_meta(question: str, findings: list[dict], supplemental_context: str | None = None) -> LLMTextResult:
     context = format_findings(findings)
-    response = await _get_chain().ainvoke(
+    response = await invoke_text_with_fallback(
+        _SECURITY_PROMPT,
         {
             "context": context,
             "supplemental_context": supplemental_context or "None.",
             "question": question,
         }
     )
-    return _clean_answer(response)
+    response.text = _clean_answer(response.text)
+    return response

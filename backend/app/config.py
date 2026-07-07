@@ -23,9 +23,14 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-secret-change-in-prod"
     environment: str = "dev"
     cors_origins: str = ""
+    frontend_url: str = ""
+    cors_origin_regex: str = ""
 
     # LLM
     llm_model: str = "claude-sonnet-4-6"
+    github_fallback_model: str = "meta/Llama-3.3-70B-Instruct"
+    github_models_api_key: str = ""
+    github_models_base_url: str = "https://models.inference.ai.azure.com"
     eval_judge_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536
@@ -87,6 +92,9 @@ class Settings(BaseSettings):
                 if origin.strip()
             ]
 
+        if self.frontend_url.strip():
+            return [self.frontend_url.strip().rstrip("/")]
+
         if self.environment == "dev":
             return [
                 "http://localhost:3000",
@@ -95,6 +103,17 @@ class Settings(BaseSettings):
             ]
 
         return []
+
+    @property
+    def allowed_cors_origin_regex(self) -> str | None:
+        if self.cors_origin_regex.strip():
+            return self.cors_origin_regex.strip()
+
+        # Production fallback for Vercel-hosted frontend deployments and previews.
+        if self.environment == "prod":
+            return r"https://.*\.vercel\.app"
+
+        return None
 
 
 settings = Settings()

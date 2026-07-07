@@ -117,6 +117,36 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RegisterResponse(BaseModel):
+    status: str
+    message: str
+
+
+class UserProfileOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    email: EmailStr
+    role: str
+    is_admin: bool
+    is_approved: bool
+    is_blocked: bool
+    created_at: datetime
+    approved_at: Optional[datetime]
+    blocked_at: Optional[datetime]
+
+
+class AdminUserUpdate(BaseModel):
+    is_admin: Optional[bool] = None
+    is_approved: Optional[bool] = None
+    is_blocked: Optional[bool] = None
+
+
+class AdminUserListOut(BaseModel):
+    items: list[UserProfileOut]
+    total: int
+
+
 class ScoreSummary(BaseModel):
     total: int
     critical: int

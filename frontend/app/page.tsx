@@ -9,17 +9,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     setLoading(true);
     try {
-      const fn = mode === "login" ? api.login : api.register;
-      const { access_token } = await fn(email, password);
-      setToken(access_token);
-      router.push("/reports");
+      if (mode === "login") {
+        const { access_token } = await api.login(email, password);
+        setToken(access_token);
+        await api.me();
+        router.push("/reports");
+      } else {
+        const res = await api.register(email, password);
+        setNotice(res.message);
+        setMode("login");
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
@@ -67,6 +75,7 @@ export default function LoginPage() {
             className="bg-white/10 text-white placeholder-white/45 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#cb156d]"
           />
           {error && <p className="text-red-400 text-sm">{error}</p>}
+          {notice && <p className="text-emerald-300 text-sm">{notice}</p>}
           <button
             type="submit"
             disabled={loading}

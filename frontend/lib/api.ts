@@ -15,12 +15,28 @@ function getToken(): string {
   return localStorage.getItem("ragscan_token") ?? "";
 }
 
+function setCurrentUser(user: UserProfile) {
+  localStorage.setItem("ragscan_user", JSON.stringify(user));
+}
+
+export function getCurrentUser(): UserProfile | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem("ragscan_user");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as UserProfile;
+  } catch {
+    return null;
+  }
+}
+
 export function setToken(token: string) {
   localStorage.setItem("ragscan_token", token);
 }
 
 export function clearToken() {
   localStorage.removeItem("ragscan_token");
+  localStorage.removeItem("ragscan_user");
 }
 
 function buildReportScopeQuery(reportIds?: string[]): string {
@@ -112,10 +128,26 @@ export const api = {
     }),
 
   register: (email: string, password: string) =>
-    req<{ access_token: string }>("/auth/register", {
+    req<RegisterResponse>("/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, role: "analyst" }),
+    }),
+
+  me: async () => {
+    const user = await req<UserProfile>("/auth/me");
+    setCurrentUser(user);
+    return user;
+  },
+
+  adminUsers: () =>
+    req<AdminUserListOut>("/auth/admin/users"),
+
+  updateAdminUser: (userId: string, patch: AdminUserUpdate) =>
+    req<UserProfile>(`/auth/admin/users/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
     }),
 
   score: (reportIds?: string[]) =>
@@ -325,7 +357,7 @@ export interface MetricsOverview {
   avg_hallucination_rate: number;
 }
 
-export interface MetricsOverviewResponse extends MetricsOverview {}
+export type MetricsOverviewResponse = MetricsOverview;
 
 export interface MetricsTrendPoint {
   day: string;
@@ -343,4 +375,32 @@ export interface MetricsTrendResponse {
   avg_citation_accuracy: number;
   avg_hallucination_rate: number;
   points: MetricsTrendPoint[];
+}
+
+export interface RegisterResponse {
+  status: "pending_approval" | "approved";
+  message: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: string;
+  is_admin: boolean;
+  is_approved: boolean;
+  is_blocked: boolean;
+  created_at: string;
+  approved_at: string | null;
+  blocked_at: string | null;
+}
+
+export interface AdminUserUpdate {
+  is_admin?: boolean;
+  is_approved?: boolean;
+  is_blocked?: boolean;
+}
+
+export interface AdminUserListOut {
+  items: UserProfile[];
+  total: number;
 }

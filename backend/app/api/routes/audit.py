@@ -13,7 +13,7 @@ router = APIRouter(tags=["audit"])
 @router.get("", response_model=AuditLogPageOut)
 async def list_audit_logs(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_auth),
+    user: User = Depends(require_auth),
     page: int = 1,
     page_size: int = 25,
 ):
@@ -21,24 +21,29 @@ async def list_audit_logs(
     page_size = min(max(5, page_size), 100)
     offset = (page - 1) * page_size
 
-    total = (await db.execute(select(func.count(AuditLog.id)))).scalar_one()
+    total_stmt = select(func.count(AuditLog.id))
+    if not user.is_admin:
+        total_stmt = total_stmt.where(AuditLog.user_id == user.id)
+    total = (await db.execute(total_stmt)).scalar_one()
 
-    rows = (
-        await db.execute(
-            select(
-                AuditLog.id,
-                AuditLog.user_id,
-                User.email.label("user_email"),
-                AuditLog.action,
-                AuditLog.entity,
-                AuditLog.ts,
-            )
-            .outerjoin(User, User.id == AuditLog.user_id)
-            .order_by(AuditLog.ts.desc())
-            .offset(offset)
-            .limit(page_size)
+    rows_stmt = (
+        select(
+            AuditLog.id,
+            AuditLog.user_id,
+            User.email.label("user_email"),
+            AuditLog.action,
+            AuditLog.entity,
+            AuditLog.ts,
         )
-    ).mappings().all()
+        .outerjoin(User, User.id == AuditLog.user_id)
+        .order_by(AuditLog.ts.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    if not user.is_admin:
+        rows_stmt = rows_stmt.where(AuditLog.user_id == user.id)
+
+    rows = (await db.execute(rows_stmt)).mappings().all()
 
     return AuditLogPageOut(
         items=[

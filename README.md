@@ -6,34 +6,13 @@ RAGScan ingests structured scan data (Nessus XML, OpenSCAP XCCDF), enriches ever
 
 ## Architecture
 
-```
-Scan file (.nessus / OpenSCAP XCCDF XML)
-          |
-          v
-  Ingestion layer (lxml parsers)
-    - Nessus: ReportHost -> ReportItem, skips severity 0
-    - OpenSCAP: XCCDF 1.1 + 1.2 namespaces, only 'fail' rule-results
-          |
-          v
-  Enrichment service  (concurrent NVD + EPSS, DB-cached per CVE)
-    NVD CVSS v3.1  +  FIRST EPSS  +  CISA KEV  (1629 entries, loaded at startup)
-          |
-          v
-  Composite risk score  ->  pgvector embedding store (1536 dims)
-          |
-    +-----|------+
-    |            |
-    v            v
- /query       /report
- Security      NIST CSF /
- Agent         ISO 27001 gap
-    |
-    v
- FastAPI  (JWT HS256, slowapi rate limiting, audit log)
-    |
-    v
- Next.js frontend  (login, dashboard, import, chat)
-```
+Figure 1. RAGScan data pipeline
+
+![Figure 1. RAGScan data pipeline](Figure_1%20RAGScan%20data%20pipeline.jpg)
+
+Figure 2. RAGScan consumption paths
+
+![Figure 2. RAGScan consumption paths](Figure_2%20RAGScan%20consumption%20paths.jpg)
 
 ## Prerequisites
 
@@ -52,11 +31,13 @@ Scan file (.nessus / OpenSCAP XCCDF XML)
 ### Docker Compose
 
 ```bash
-# copy and fill in your API keys
+# create the repo-root environment file and fill in your API keys
 cp .env.example .env
 
 docker compose up --build
 ```
+
+The repo-root `.env` is the canonical local configuration file. The backend also reads this file when started directly from the repo root.
 
 Open:
 
@@ -116,6 +97,7 @@ python scripts/load_demo_data.py --url http://localhost:8000
 ## Running tests
 
 ```bash
+source venv/bin/activate
 cd backend
 pip install -r requirements.txt
 pytest tests/ -v --tb=short
@@ -126,8 +108,8 @@ pytest tests/ -v --tb=short
 Optional LLM-judged faithfulness tests are marked `eval` and skipped by default:
 
 ```bash
-cd backend
 source venv/bin/activate
+cd backend
 pytest -m eval -v
 ```
 
@@ -225,6 +207,8 @@ docker-compose.yml
 | `NVD_API_KEY` | No | Raises NVD rate limit from 5 to 50 req/30 s |
 | `ENVIRONMENT` | No | `dev` (permissive CORS) or `prod` |
 
+Put local environment variables in the repo-root `.env` file. The backend prefers `/.env` over `backend/.env`.
+
 ## Score Guide And Compliance Export
 
 - Use the in-app **Guide** page (`/guide`) to understand the composite risk formula and score bands.
@@ -238,8 +222,8 @@ docker-compose.yml
 To show retrieval quality and answer grounding, use a labeled JSONL evaluation set and run the metrics script:
 
 ```bash
-cd backend
 source venv/bin/activate
+cd backend
 python ../scripts/evaluate_rag_metrics.py ../sample_data/eval_cases.jsonl --html-out ../reports/eval_report.html --pdf-out ../reports/eval_report.pdf
 ```
 
@@ -254,8 +238,8 @@ Deterministic (default) metrics in the script are:
 Optional LLM-judged metrics (free-text only) are available via DeepEval and are **off by default**:
 
 ```bash
-cd backend
 source venv/bin/activate
+cd backend
 EVAL_JUDGE_MODEL=gpt-4.1-mini python ../scripts/evaluate_rag_metrics.py ../sample_data/eval_cases.jsonl --with-deepeval --html-out ../reports/eval_report.html --pdf-out ../reports/eval_report.pdf
 ```
 

@@ -16,7 +16,9 @@ services:
       retries: 5
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql+asyncpg://dev:dev@postgres:5432/ragscan
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -27,7 +29,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
     depends_on:
       postgres:
         condition: service_healthy

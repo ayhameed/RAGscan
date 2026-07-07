@@ -35,10 +35,10 @@ async def generate_report(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_auth),
 ):
-    if not settings.anthropic_api_key and not settings.github_models_api_key:
+    if not settings.anthropic_api_key and not settings.fallback_llm_api_key:
         raise HTTPException(
             status_code=503,
-            detail="No LLM provider configured. Set ANTHROPIC_API_KEY or GITHUB_MODELS_API_KEY.",
+            detail="No LLM provider configured. Set ANTHROPIC_API_KEY or FALLBACK_LLM_API_KEY.",
         )
 
     if body.framework not in _VALID_FRAMEWORKS:
@@ -93,7 +93,7 @@ async def generate_report(
 
     response.headers["X-LLM-Provider"] = active_provider
     if fallback_used:
-        response.headers["X-LLM-Fallback"] = "github-open-model"
+        response.headers["X-LLM-Fallback"] = "fallback-llm"
 
     report = Report(report_type=body.framework, path=path)
     db.add(report)

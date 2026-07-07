@@ -28,10 +28,10 @@ class Settings(BaseSettings):
 
     # LLM
     llm_model: str = "claude-sonnet-4-6"
-    github_fallback_model: str = "openai/gpt-oss-20b"
-    github_fallback_models: str = ""
-    github_models_api_key: str = ""
-    github_models_base_url: str = "https://models.github.ai/inference"
+    fallback_llm_model: str = "openai/gpt-oss-20b"
+    fallback_llm_models: str = "openai/gpt-oss-120b,llama-3.3-70b-versatile"
+    fallback_llm_api_key: str = ""
+    fallback_llm_base_url: str = "https://api.groq.com/openai/v1"
     eval_judge_model: str = "gpt-4.1-mini"
     embedding_model: str = "text-embedding-3-small"
     embedding_dims: int = 1536

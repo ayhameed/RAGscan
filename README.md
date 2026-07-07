@@ -22,13 +22,13 @@ Figure 2. RAGScan consumption paths
 **API keys**
 - `OPENAI_API_KEY` — text-embedding-3-small (required for RAG retrieval)
 - `ANTHROPIC_API_KEY` — primary LLM for chat/report/deepeval generation
-- `GITHUB_MODELS_API_KEY` — optional fallback LLM provider (OpenAI-compatible endpoint)
+- `FALLBACK_LLM_API_KEY` — optional fallback LLM provider (any OpenAI-compatible endpoint; defaults to Groq — get a free key at https://console.groq.com/keys)
 - `NVD_API_KEY` — optional; raises NVD rate limit from 5 to 50 req/30 s
 
 For LLM-powered endpoints (`/query`, `/report`, `/analyse/deepeval/download`), configure at least one text-generation provider:
 
 - Primary: `ANTHROPIC_API_KEY`
-- Fallback: `GITHUB_MODELS_API_KEY`
+- Fallback: `FALLBACK_LLM_API_KEY` (used automatically when the primary provider hits a credit/quota error, or as the sole provider if `ANTHROPIC_API_KEY` is unset)
 
 > The `/ingest` and `/score` endpoints are fully functional without any API keys — enrichment via NVD, EPSS, and CISA KEV uses only HTTP calls.
 
@@ -76,7 +76,7 @@ python scripts/load_demo_data.py --url http://localhost:8000
 4. Go to **Reports** to select an uploaded report and inspect scoped findings.
 5. Go to **Guide** to understand risk score interpretation and prioritization bands.
 6. Go to **Dashboard** for executive summary, live grounding metrics, compliance PDF export, and DeepEval PDF export.
-7. Go to **Chat** to ask natural-language questions about your findings (requires `OPENAI_API_KEY` and at least one generation provider: `ANTHROPIC_API_KEY` or `GITHUB_MODELS_API_KEY`).
+7. Go to **Chat** to ask natural-language questions about your findings (requires `OPENAI_API_KEY` and at least one generation provider: `ANTHROPIC_API_KEY` or `FALLBACK_LLM_API_KEY`).
 8. Go to **Logs** to review activity history.
 9. If you are an admin, use **Admin** to approve users, grant/revoke admin rights, and block/unblock accounts.
 
@@ -119,7 +119,7 @@ LLM provider status badge:
 
 - Dashboard and Chat show the active provider state.
 - `Primary: Anthropic` appears when primary model calls succeed.
-- `Fallback: ...` appears when quota/credit fallback routes requests to GitHub Models.
+- `Fallback: ...` appears when quota/credit fallback routes requests to the configured fallback LLM provider.
 
 ## API reference
 
@@ -151,7 +151,7 @@ LLM provider status badge:
 
 LLM routes expose provider headers for UI status tracking:
 
-- `X-LLM-Provider`: active provider (`anthropic` or `github-open-model:<model-id>`)
+- `X-LLM-Provider`: active provider (`anthropic` or `fallback-llm:<model-id>`)
 - `X-LLM-Fallback`: present when fallback was used
 - `X-LLM-Fallback-Reason`: fallback trigger reason
 
@@ -289,10 +289,10 @@ Dockerfile
 | `DATABASE_URL` | Yes | `postgresql+asyncpg://user:pass@host/db` |
 | `JWT_SECRET` | Yes | Random 256-bit string for JWT HS256 signing |
 | `ANTHROPIC_API_KEY` | For chat/report | Claude LLM (claude-sonnet-4-6 by default) |
-| `GITHUB_MODELS_API_KEY` | Optional fallback | GitHub Models key for OpenAI-compatible fallback generation |
-| `GITHUB_FALLBACK_MODEL` | Optional | Primary fallback model ID (default: `openai/gpt-oss-20b`) |
-| `GITHUB_FALLBACK_MODELS` | Optional | Comma-separated backup model IDs tried on `unknown_model` errors |
-| `GITHUB_MODELS_BASE_URL` | Optional | OpenAI-compatible endpoint base URL (default: `https://models.github.ai/inference`) |
+| `FALLBACK_LLM_API_KEY` | Optional fallback | API key for the OpenAI-compatible fallback provider (default: Groq) |
+| `FALLBACK_LLM_MODEL` | Optional | Primary fallback model ID (default: `openai/gpt-oss-20b`) |
+| `FALLBACK_LLM_MODELS` | Optional | Comma-separated backup model IDs tried on `unknown_model` errors (default: `openai/gpt-oss-120b,llama-3.3-70b-versatile`) |
+| `FALLBACK_LLM_BASE_URL` | Optional | OpenAI-compatible endpoint base URL (default: `https://api.groq.com/openai/v1`) |
 | `OPENAI_API_KEY` | For chat/report | Embeddings (text-embedding-3-small, 1536 dims) |
 | `NVD_API_KEY` | No | Raises NVD rate limit from 5 to 50 req/30 s |
 | `ENVIRONMENT` | No | `dev` (permissive CORS) or `prod` |

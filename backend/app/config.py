@@ -6,11 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-ENV_FILE = BASE_DIR / ".env"
+ROOT_DIR = BASE_DIR.parent
+BACKEND_ENV_FILE = BASE_DIR / ".env"
+ROOT_ENV_FILE = ROOT_DIR / ".env"
+ENV_FILE = ROOT_ENV_FILE if ROOT_ENV_FILE.exists() else BACKEND_ENV_FILE
 
 
 class Settings(BaseSettings):
-    # Always load backend/.env no matter the current working directory.
+    # Prefer the repo-root .env so local Docker, Render, and manual runs share one source.
     model_config = SettingsConfigDict(env_file=str(ENV_FILE), extra="ignore")
 
     anthropic_api_key: str = ""
@@ -68,8 +71,6 @@ class Settings(BaseSettings):
             return value
 
         return urlunsplit(parts._replace(query=urlencode(query_items)))
-
-        return value
 
     @property
     def allowed_cors_origins(self) -> list[str]:

@@ -3,7 +3,7 @@ services:
     name: ragscan-backend
     env: docker
     plan: free
-    rootDir: backend
+    rootDir: .
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:

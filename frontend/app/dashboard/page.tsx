@@ -28,6 +28,20 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [framework, setFramework] = useState<"nist_csf" | "iso27001" | "executive">("nist_csf");
   const [exporting, setExporting] = useState(false);
+  const [exportingDeepEval, setExportingDeepEval] = useState(false);
+  const [uploadsPage, setUploadsPage] = useState(1);
+  const [trendPage, setTrendPage] = useState(1);
+  const [detectionsPage, setDetectionsPage] = useState(1);
+
+  const pageSize = 10;
+  const uploadTotalPages = Math.max(1, Math.ceil(reports.length / pageSize));
+  const pagedReports = reports.slice((uploadsPage - 1) * pageSize, uploadsPage * pageSize);
+  const trendPoints = (trend?.points ?? []).slice().reverse();
+  const trendTotalPages = Math.max(1, Math.ceil(trendPoints.length / pageSize));
+  const pagedTrend = trendPoints.slice((trendPage - 1) * pageSize, trendPage * pageSize);
+  const detections = data?.findings ?? [];
+  const detectionsTotalPages = Math.max(1, Math.ceil(detections.length / pageSize));
+  const pagedDetections = detections.slice((detectionsPage - 1) * pageSize, detectionsPage * pageSize);
 
   async function loadReports() {
     const rows = await api.uploadReports();
@@ -36,7 +50,25 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    loadReports().catch((e: Error) => setError(e.message));
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const rows = await api.uploadReports();
+        if (!cancelled) {
+          setReports(rows);
+          setSelectedReportIds((prev) => prev.filter((id) => rows.some((r) => r.id === id)));
+        }
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load reports");
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -84,16 +116,22 @@ export default function DashboardPage() {
   }
 
   function toggleReport(id: string) {
+    setDetectionsPage(1);
+    setTrendPage(1);
     setSelectedReportIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
   }
 
   function selectAllReports() {
+    setDetectionsPage(1);
+    setTrendPage(1);
     setSelectedReportIds(reports.map((r) => r.id));
   }
 
   function clearReportSelection() {
+    setDetectionsPage(1);
+    setTrendPage(1);
     setSelectedReportIds([]);
   }
 
@@ -117,6 +155,18 @@ export default function DashboardPage() {
       setError(e instanceof Error ? e.message : "Export failed");
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function exportDeepEvalPdf() {
+    setError(null);
+    setExportingDeepEval(true);
+    try {
+      await api.downloadDeepEvalPdf();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "DeepEval export failed");
+    } finally {
+      setExportingDeepEval(false);
     }
   }
 
@@ -192,7 +242,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {reports.map((r) => (
+                {pagedReports.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => toggleReport(r.id)}
@@ -241,6 +291,27 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
+          {reports.length > 0 && (
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+              <p className="text-gray-500 text-xs">Page {uploadsPage} of {uploadTotalPages}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setUploadsPage((p) => Math.max(1, p - 1))}
+                  disabled={uploadsPage <= 1}
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setUploadsPage((p) => Math.min(uploadTotalPages, p + 1))}
+                  disabled={uploadsPage >= uploadTotalPages}
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {data && (
@@ -325,7 +396,7 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {(trend?.points ?? []).slice().reverse().map((point) => (
+                    {pagedTrend.map((point) => (
                       <tr key={point.day} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-700">{point.day}</td>
                         <td className="px-4 py-3 text-right text-gray-700">{point.queries}</td>
@@ -344,6 +415,27 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {trendPoints.length > 0 && (
+                <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                  <p className="text-gray-500 text-xs">Page {trendPage} of {trendTotalPages}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setTrendPage((p) => Math.max(1, p - 1))}
+                      disabled={trendPage <= 1}
+                      className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setTrendPage((p) => Math.min(trendTotalPages, p + 1))}
+                      disabled={trendPage >= trendTotalPages}
+                      className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
@@ -371,6 +463,13 @@ export default function DashboardPage() {
                   >
                     {exporting ? "Generating..." : "Export PDF"}
                   </button>
+                  <button
+                    onClick={exportDeepEvalPdf}
+                    disabled={exportingDeepEval}
+                    className="border border-[#580d60] text-[#580d60] hover:bg-[#580d60]/10 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {exportingDeepEval ? "Generating DeepEval..." : "Download DeepEval PDF"}
+                  </button>
                 </div>
               </div>
             </div>
@@ -390,7 +489,7 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {data.findings.map((f) => (
+                    {pagedDetections.map((f) => (
                       <tr key={f.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-mono text-xs text-indigo-700">{f.cve_id ?? "NO-CVE"}</td>
                         <td className="px-4 py-3 text-gray-700 max-w-130 truncate" title={f.title}>{f.title}</td>
@@ -410,6 +509,27 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {detections.length > 0 && (
+                <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                  <p className="text-gray-500 text-xs">Page {detectionsPage} of {detectionsTotalPages}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setDetectionsPage((p) => Math.max(1, p - 1))}
+                      disabled={detectionsPage <= 1}
+                      className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => setDetectionsPage((p) => Math.min(detectionsTotalPages, p + 1))}
+                      disabled={detectionsPage >= detectionsTotalPages}
+                      className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

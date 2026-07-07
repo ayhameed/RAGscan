@@ -785,8 +785,9 @@ def _render_pdf(path: Path, rows: list[dict[str, Any]], deepeval: dict[str, Any]
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate grounded retrieval quality and hallucination rate.")
     parser.add_argument("dataset", type=Path, help="JSONL file with evaluation cases")
-    parser.add_argument("--html-out", type=Path, default=Path("reports/eval_report.html"), help="Where to write the HTML report")
-    parser.add_argument("--pdf-out", type=Path, default=Path("reports/eval_report.pdf"), help="Where to write the PDF report")
+    default_reports_dir = ROOT / "reports" / "evaluations"
+    parser.add_argument("--html-out", type=Path, default=default_reports_dir / "eval_report.html", help="Where to write the HTML report")
+    parser.add_argument("--pdf-out", type=Path, default=default_reports_dir / "eval_report.pdf", help="Where to write the PDF report")
     parser.add_argument("--with-deepeval", action="store_true", help="Run optional LLM-judged free-text metrics (DeepEval)")
     parser.add_argument("--faithfulness-threshold", type=float, default=0.7, help="Pass threshold for DeepEval faithfulness metric")
     args = parser.parse_args()
@@ -808,12 +809,16 @@ async def main() -> None:
         except Exception as exc:
             raise SystemExit("DeepEval is not installed. Install backend requirements to use --with-deepeval.") from exc
         deepeval_results = await _evaluate_with_deepeval(cases, args.faithfulness_threshold)
+        if args.html_out == (default_reports_dir / "eval_report.html"):
+            args.html_out = default_reports_dir / "eval_report_deepeval.html"
+        if args.pdf_out == (default_reports_dir / "eval_report.pdf"):
+            args.pdf_out = default_reports_dir / "eval_report_deepeval.pdf"
 
     _print_summary(rows, deepeval=deepeval_results)
     _render_html(args.html_out, rows, deepeval=deepeval_results)
     _render_pdf(args.pdf_out, rows, deepeval=deepeval_results)
-    print(f"HTML report written to: {args.html_out}")
-    print(f"PDF report written to: {args.pdf_out}")
+    print(f"HTML report written to: {args.html_out.resolve()}")
+    print(f"PDF report written to: {args.pdf_out.resolve()}")
 
 
 def _run_async_entrypoint(coro: Any) -> Any:

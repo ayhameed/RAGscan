@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef, DragEvent, ChangeEvent } from "react";
 import Nav from "@/components/Nav";
 import AuthGuard from "@/components/AuthGuard";
-import { api, IngestResponse, UploadReport } from "@/lib/api";
+import { api, DemoIngestItem, IngestResponse, UploadReport } from "@/lib/api";
 
 export default function ImportPage() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -10,8 +10,15 @@ export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<IngestResponse | null>(null);
+  const [demoResults, setDemoResults] = useState<DemoIngestItem[]>([]);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [uploads, setUploads] = useState<UploadReport[]>([]);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
+
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(uploads.length / pageSize));
+  const pagedUploads = uploads.slice((page - 1) * pageSize, page * pageSize);
 
   useEffect(() => {
     api.uploadReports().then(setUploads).catch(() => {});
@@ -45,10 +52,34 @@ export default function ImportPage() {
       setResult(res);
       const reports = await api.uploadReports();
       setUploads(reports);
+      setPage(1);
+      setDemoResults([]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDemoData() {
+    setDemoLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await api.ingestDemoData();
+      setDemoResults(res.items);
+      const reports = await api.uploadReports();
+      setUploads(reports);
+      setPage(1);
+      const successful = res.items.find((item) => item.status === "ingested");
+      if (successful) {
+        setFile(null);
+        if (inputRef.current) inputRef.current.value = "";
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Demo load failed");
+    } finally {
+      setDemoLoading(false);
     }
   }
 
@@ -122,6 +153,14 @@ export default function ImportPage() {
           {loading ? "Uploading and processing..." : "Upload and ingest"}
         </button>
 
+        <button
+          onClick={loadDemoData}
+          disabled={demoLoading || loading}
+          className="mt-3 w-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-medium py-3 rounded-xl text-sm transition-colors disabled:opacity-40"
+        >
+          {demoLoading ? "Loading demo data..." : "Load Demo Data"}
+        </button>
+
         {error && (
           <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
             {error}
@@ -164,6 +203,28 @@ export default function ImportPage() {
           </div>
         )}
 
+        {demoResults.length > 0 && (
+          <div className="mt-6 bg-white border border-gray-200 rounded-xl p-6">
+            <h3 className="font-semibold text-gray-800 mb-4">Demo data load result</h3>
+            <div className="space-y-3">
+              {demoResults.map((item) => (
+                <div key={`${item.filename}-${item.status}`} className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-900">
+                  <p><span className="font-semibold">File:</span> {item.filename}</p>
+                  <p><span className="font-semibold">Status:</span> {item.status}</p>
+                  {item.upload_id && <p><span className="font-semibold">Report ID:</span> <span className="font-mono">{item.upload_id}</span></p>}
+                  {item.status === "ingested" && (
+                    <p>
+                      <span className="font-semibold">Counts:</span> ingested {item.ingested}, enriched {item.enriched}, skipped {item.skipped}
+                    </p>
+                  )}
+                  {item.detail && <p><span className="font-semibold">Detail:</span> {item.detail}</p>}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-4">Demo files are now available in the upload log below. You can proceed to Dashboard or Chat.</p>
+          </div>
+        )}
+
         <div className="mt-8 bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h3 className="font-medium text-gray-700">Upload Log</h3>
@@ -181,7 +242,7 @@ export default function ImportPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {uploads.map((u) => (
+                {pagedUploads.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-700">{u.filename}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{u.user_email}</td>
@@ -200,6 +261,27 @@ export default function ImportPage() {
               </tbody>
             </table>
           </div>
+          {uploads.length > 0 && (
+            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+              <p className="text-gray-500 text-xs">Page {page} of {totalPages}</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
+                  className="px-3 py-1 text-xs rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </AuthGuard>

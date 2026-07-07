@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -32,6 +33,32 @@ export default function LoginPage() {
       setError(err instanceof Error ? err.message : "Request failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadDemoData() {
+    setError(null);
+    setNotice(null);
+    setDemoLoading(true);
+    try {
+      const hasToken = typeof window !== "undefined" && !!localStorage.getItem("ragscan_token");
+      if (!hasToken) {
+        setError("Sign in first, then click Load Demo Data.");
+        return;
+      }
+
+      const res = await api.ingestDemoData();
+      const ingested = res.items.filter((item) => item.status === "ingested").map((item) => item.filename);
+      if (ingested.length === 0) {
+        setError("Demo load did not ingest files. Check backend logs/env and try again.");
+        return;
+      }
+
+      setNotice(`Demo loaded: ${ingested.join(", ")}. Proceed to Reports or Chat.`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Demo load failed");
+    } finally {
+      setDemoLoading(false);
     }
   }
 
@@ -84,6 +111,15 @@ export default function LoginPage() {
             {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
           </button>
         </form>
+
+        <button
+          type="button"
+          onClick={loadDemoData}
+          disabled={demoLoading || loading}
+          className="mt-3 w-full border border-white/30 hover:bg-white/10 text-white font-medium py-2.5 rounded-lg text-sm transition-colors disabled:opacity-50"
+        >
+          {demoLoading ? "Loading demo data..." : "Load Demo Data"}
+        </button>
       </div>
     </div>
   );

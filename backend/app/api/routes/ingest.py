@@ -9,8 +9,7 @@ import uuid
 from app.api.auth_utils import require_auth
 from app.config import settings
 from app.core.enrichment.enricher import enrich_finding
-from app.core.ingestion.nessus_parser import parse_nessus
-from app.core.ingestion.openscap_parser import parse_openscap
+from app.core.ingestion.scan_parser import parse_scan_file
 from app.core.rag.embedder import embed_batch
 from app.core.scoring.risk_scorer import score_finding
 from app.db.session import get_db
@@ -24,18 +23,6 @@ router = APIRouter(tags=["ingest"])
 _MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
-def _detect_format(filename: str, content: bytes) -> str:
-    fname = filename.lower()
-    if fname.endswith(".nessus"):
-        return "nessus"
-    if fname.endswith(".xml") or fname.endswith(".xccdf"):
-        if b"xccdf" in content[:2000].lower() or b"oval" in content[:2000].lower():
-            return "openscap"
-        if b"reporthost" in content[:2000].lower() or b"nessusclientdata" in content[:2000].lower():
-            return "nessus"
-    raise ValueError(f"Unrecognised file format: {filename}")
-
-
 async def _ingest_contents(
     filename: str,
     contents: bytes,
@@ -45,15 +32,16 @@ async def _ingest_contents(
     if len(contents) > _MAX_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
 
-    try:
-        fmt = _detect_format(filename, contents)
-    except ValueError as exc:
-        raise HTTPException(status_code=415, detail=str(exc))
+    if not contents.strip().startswith(b"<"):
+        raise HTTPException(status_code=415, detail=f"Unsupported non-XML file: {filename}")
 
-    if fmt == "nessus":
-        raw_findings = parse_nessus(contents)
-    else:
-        raw_findings = parse_openscap(contents)
+    try:
+        parse_result = parse_scan_file(contents, filename)
+    except Exception as exc:
+        raise HTTPException(status_code=415, detail=f"Failed to parse XML scan file: {exc}")
+
+    fmt = parse_result.source
+    raw_findings = parse_result.findings
 
     upload = ScanUpload(
         user_id=user.id,
@@ -74,6 +62,10 @@ async def _ingest_contents(
             ingested=0,
             enriched=0,
             skipped=0,
+            detected_tool=parse_result.detected_tool,
+            parser_used=parse_result.parser_used,
+            fallback_used=parse_result.fallback_used,
+            parse_warnings=parse_result.parse_warnings,
         )
 
     db_findings: list[Finding] = []
@@ -110,6 +102,10 @@ async def _ingest_contents(
         ingested=len(db_findings),
         enriched=enriched,
         skipped=skipped,
+        detected_tool=parse_result.detected_tool,
+        parser_used=parse_result.parser_used,
+        fallback_used=parse_result.fallback_used,
+        parse_warnings=parse_result.parse_warnings,
     )
 
 

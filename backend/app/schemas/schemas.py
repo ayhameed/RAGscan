@@ -47,6 +47,10 @@ class IngestResponse(BaseModel):
     ingested: int
     enriched: int
     skipped: int
+    detected_tool: Optional[str] = None
+    parser_used: Optional[str] = None
+    fallback_used: bool = False
+    parse_warnings: list[str] = Field(default_factory=list)
 
 
 class DemoIngestItem(BaseModel):

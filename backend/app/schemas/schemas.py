@@ -49,6 +49,22 @@ class IngestResponse(BaseModel):
     skipped: int
 
 
+class DemoIngestItem(BaseModel):
+    filename: str
+    source: Optional[str] = None
+    status: str
+    detail: Optional[str] = None
+    upload_id: Optional[uuid.UUID] = None
+    uploaded_at: Optional[datetime] = None
+    ingested: int = 0
+    enriched: int = 0
+    skipped: int = 0
+
+
+class DemoIngestResponse(BaseModel):
+    items: list[DemoIngestItem]
+
+
 class QueryRequest(BaseModel):
     question: str
     session_id: Optional[uuid.UUID] = None

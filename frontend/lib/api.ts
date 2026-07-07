@@ -198,6 +198,9 @@ export const api = {
     return req<IngestResponse>("/ingest", { method: "POST", body: fd });
   },
 
+  ingestDemoData: () =>
+    req<DemoIngestResponse>("/ingest/demo", { method: "POST" }),
+
   uploadReports: () =>
     req<UploadReport[]>("/ingest/reports"),
 
@@ -241,6 +244,9 @@ export const api = {
 
   downloadComplianceReport: async (reportId: string, filename = `ragscan_${reportId}.pdf`) =>
     downloadPdf(`/report/${encodeURIComponent(reportId)}/download`, filename),
+
+  downloadDeepEvalPdf: async (filename = "ragscan_deepeval_report.pdf") =>
+    downloadPdf("/analyse/deepeval/download", filename),
 
   metricsOverview: (reportIds?: string[]) =>
     req<MetricsOverviewResponse>(`/metrics/overview${buildMetricsScopeQuery(reportIds)}`),
@@ -314,6 +320,22 @@ export interface IngestResponse {
   ingested: number;
   enriched: number;
   skipped: number;
+}
+
+export interface DemoIngestItem {
+  filename: string;
+  source: string | null;
+  status: "ingested" | "failed" | "missing";
+  detail: string | null;
+  upload_id: string | null;
+  uploaded_at: string | null;
+  ingested: number;
+  enriched: number;
+  skipped: number;
+}
+
+export interface DemoIngestResponse {
+  items: DemoIngestItem[];
 }
 
 export interface UploadReport {

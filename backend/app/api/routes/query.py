@@ -37,6 +37,8 @@ _STOPWORDS = {
 
 logger = logging.getLogger("ragscan")
 router = APIRouter(tags=["query"])
+
+
 def _serialize_history(history: list[dict]) -> list[dict]:
     return [
         {
@@ -205,7 +207,7 @@ async def _fetch_secondary_context(findings: list[dict]) -> str | None:
     return "Internet context (NVD/EPSS):\n" + "\n".join(lines)
 
 
-def _render_session_pdf(session_id: UUID, history: list[dict]) -> str:
+def _render_session_pdf(session_id: UUID, history: list[dict], metrics_rows: list[ResponseMetric]) -> str:
     reports_dir = "reports"
     import os
     os.makedirs(reports_dir, exist_ok=True)
@@ -223,8 +225,23 @@ def _render_session_pdf(session_id: UUID, history: list[dict]) -> str:
     )
     story = [
         Paragraph("RAGScan Conversation Export", title),
+        Paragraph(f"Session: {session_id}", body),
         Spacer(1, 4 * mm),
     ]
+    if metrics_rows:
+        avg_p10 = sum(item.retrieval_precision_at_10 for item in metrics_rows) / len(metrics_rows)
+        avg_citation = sum(item.citation_accuracy for item in metrics_rows) / len(metrics_rows)
+        avg_hallucination = sum(item.hallucination_rate for item in metrics_rows) / len(metrics_rows)
+        source_total = sum(item.source_count for item in metrics_rows)
+        citation_total = sum(item.citation_count for item in metrics_rows)
+        story.append(Paragraph("Session Metrics", body))
+        story.append(Paragraph(f"Queries: {len(metrics_rows)}", body))
+        story.append(Paragraph(f"Avg P@10: {avg_p10:.3f}", body))
+        story.append(Paragraph(f"Avg Citation Accuracy: {avg_citation:.3f}", body))
+        story.append(Paragraph(f"Avg Hallucination Rate: {avg_hallucination:.3f}", body))
+        story.append(Paragraph(f"Total Sources/Citations: {source_total}/{citation_total}", body))
+        story.append(Spacer(1, 4 * mm))
+
     for item in history:
         role = str(item.get("role", "assistant")).title()
         text = _clean_pdf_text(str(item.get("text", "")))
@@ -440,7 +457,14 @@ async def download_session_pdf(
     if not session or session.user_id != user.id:
         raise HTTPException(status_code=404, detail="Chat session not found")
     history = session.history if isinstance(session.history, list) else []
-    path = _render_session_pdf(session.id, history)
+    metrics_rows = (
+        await db.execute(
+            select(ResponseMetric)
+            .where(ResponseMetric.session_id == session.id, ResponseMetric.user_id == user.id)
+            .order_by(ResponseMetric.created_at.asc())
+        )
+    ).scalars().all()
+    path = _render_session_pdf(session.id, history, metrics_rows)
     return FileResponse(path, media_type="application/pdf", filename=f"ragscan_chat_{session_id}.pdf")
 
 

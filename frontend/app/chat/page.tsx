@@ -13,6 +13,8 @@ interface Message {
   secondaryContext?: string;
 }
 
+const MAX_PREVIEW_CHARS = 480;
+
 const STARTERS = [
   "Which findings are in the CISA Known Exploited Vulnerabilities catalog?",
   "What are the top 5 highest-risk vulnerabilities?",
@@ -22,6 +24,9 @@ const STARTERS = [
 
 function ChatBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
+  const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = !isUser && msg.text.length > MAX_PREVIEW_CHARS;
+  const visibleText = shouldCollapse && !expanded ? `${msg.text.slice(0, MAX_PREVIEW_CHARS)}...` : msg.text;
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -31,7 +36,16 @@ function ChatBubble({ msg }: { msg: Message }) {
             : "bg-white border border-gray-200 text-gray-800 rounded-bl-sm"
         }`}
       >
-        <p className="whitespace-pre-wrap">{msg.text}</p>
+        <p className="whitespace-pre-wrap">{visibleText}</p>
+        {shouldCollapse && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="mt-2 text-xs font-medium text-indigo-300 hover:text-indigo-200"
+          >
+            {expanded ? "Read less" : "Read more"}
+          </button>
+        )}
         {msg.sources && msg.sources.length > 0 && (
           <div className="mt-2 border-t border-gray-100 pt-2">
             <p className="text-xs text-gray-400 mb-1">Sources</p>
@@ -76,18 +90,33 @@ function ChatBubble({ msg }: { msg: Message }) {
 }
 
 export default function ChatPage() {
-  const [handoffReportIds, setHandoffReportIds] = useState<string[]>([]);
-  const [handoffPrompt, setHandoffPrompt] = useState("");
+  const [handoffReportIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    const params = new URLSearchParams(window.location.search);
+    const single = params.get("report_id");
+    const multi = params.get("report_ids");
+    return multi
+      ? multi.split(",").map((x) => x.trim()).filter(Boolean)
+      : (single ? [single] : []);
+  });
+  const [handoffPrompt] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("prompt") ?? "";
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionId, setSessionId] = useState<string>("");
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem("ragscan_chat_session_id") ?? "";
+  });
   const [exporting, setExporting] = useState(false);
   const [showInternetContext, setShowInternetContext] = useState(true);
   const [reports, setReports] = useState<UploadReport[]>([]);
   const [selectedReportIds, setSelectedReportIds] = useState<string[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
+  const [findingsPage, setFindingsPage] = useState(1);
   const bottomRef = useRef<HTMLDivElement>(null);
   const autoPromptSentRef = useRef(false);
 
@@ -96,21 +125,8 @@ export default function ChatPage() {
   }, [messages]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const single = params.get("report_id");
-    const multi = params.get("report_ids");
-    const parsed = multi
-      ? multi.split(",").map((x) => x.trim()).filter(Boolean)
-      : (single ? [single] : []);
-    setHandoffReportIds(parsed);
-    setHandoffPrompt(params.get("prompt") ?? "");
-  }, []);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("ragscan_chat_session_id") ?? "";
-    if (!saved) return;
-    setSessionId(saved);
-    api.chatSessionHistory(saved)
+    if (!sessionId) return;
+    api.chatSessionHistory(sessionId)
       .then((res) => {
         setMessages(
           res.history.map((item) => ({
@@ -123,7 +139,7 @@ export default function ChatPage() {
         window.localStorage.removeItem("ragscan_chat_session_id");
         setSessionId("");
       });
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     api.uploadReports()
@@ -140,11 +156,16 @@ export default function ChatPage() {
       .then((s) => {
         setFindings(s.findings);
         setSelectedFindingIds([]);
+        setFindingsPage(1);
       })
       .catch(() => {
         setFindings([]);
       });
   }, [selectedReportIds]);
+
+  const findingsPageSize = 10;
+  const findingsTotalPages = Math.max(1, Math.ceil(findings.length / findingsPageSize));
+  const pagedFindings = findings.slice((findingsPage - 1) * findingsPageSize, findingsPage * findingsPageSize);
 
   useEffect(() => {
     const prompt = handoffPrompt;
@@ -298,7 +319,7 @@ export default function ChatPage() {
             Tip: choose one or more uploaded files above, then optionally choose specific findings below.
           </p>
           <div className="mt-3 max-h-36 overflow-auto border border-white/10 rounded-lg bg-white/5">
-            {findings.map((f) => (
+            {pagedFindings.map((f) => (
               <label key={f.id} className="flex items-start gap-2 px-3 py-2 text-xs border-b border-white/10">
                 <input
                   type="checkbox"
@@ -316,6 +337,29 @@ export default function ChatPage() {
               <div className="px-3 py-2 text-xs text-white/60">No findings available for selection.</div>
             )}
           </div>
+          {findings.length > 0 && (
+            <div className="mt-2 flex items-center justify-between text-xs text-white/70">
+              <span>Page {findingsPage} of {findingsTotalPages}</span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFindingsPage((p) => Math.max(1, p - 1))}
+                  disabled={findingsPage <= 1}
+                  className="px-2 py-1 rounded border border-white/30 disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFindingsPage((p) => Math.min(findingsTotalPages, p + 1))}
+                  disabled={findingsPage >= findingsTotalPages}
+                  className="px-2 py-1 rounded border border-white/30 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto py-6 flex flex-col gap-4 min-h-0">
@@ -347,16 +391,16 @@ export default function ChatPage() {
 
           {loading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-2xl rounded-bl-sm px-4 py-3">
-                <span className="flex gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="w-2 h-2 bg-white/60 rounded-full animate-bounce"
-                      style={{ animationDelay: `${i * 0.15}s` }}
-                    />
-                  ))}
-                </span>
+              <div className="rounded-2xl rounded-bl-sm px-4 py-3 border border-white/20 bg-[rgba(34,17,38,0.9)] min-w-55">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="w-2 h-2 rounded-full bg-[#cb156d] animate-pulse" />
+                  <span className="text-xs text-white/80">Analyzing evidence...</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="h-1.5 rounded bg-white/20 animate-pulse" />
+                  <div className="h-1.5 rounded bg-white/15 animate-pulse" style={{ animationDelay: "120ms" }} />
+                  <div className="h-1.5 w-2/3 rounded bg-white/10 animate-pulse" style={{ animationDelay: "220ms" }} />
+                </div>
               </div>
             </div>
           )}

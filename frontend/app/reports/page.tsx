@@ -40,6 +40,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string>("");
   const [purging, setPurging] = useState(false);
+  const [findingsPage, setFindingsPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshReports(nextSelectedId?: string) {
@@ -52,10 +53,25 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    setLoading(true);
-    refreshReports()
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await refreshReports();
+      } catch (e: unknown) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to refresh reports");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -101,6 +117,9 @@ export default function ReportsPage() {
     if (!summary) return [];
     return [...summary.findings].sort((a, b) => (b.risk_score ?? -1) - (a.risk_score ?? -1));
   }, [summary]);
+  const findingsPageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(findings.length / findingsPageSize));
+  const pagedFindings = findings.slice((findingsPage - 1) * findingsPageSize, findingsPage * findingsPageSize);
 
   function openChatWithTop5() {
     const qs = new URLSearchParams();
@@ -170,6 +189,7 @@ export default function ReportsPage() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
+                    setFindingsPage(1);
                     setSelectedReportId("");
                   }
                 }}
@@ -192,6 +212,7 @@ export default function ReportsPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
+                      setFindingsPage(1);
                       setSelectedReportId(r.id);
                     }
                   }}
@@ -257,7 +278,7 @@ export default function ReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
-                  {findings.map((f) => (
+                  {pagedFindings.map((f) => (
                     <tr key={f.id} className="hover:bg-white/5">
                       <td className="px-4 py-3 text-xs font-mono text-white/90">{f.cve_id ?? "NO-CVE"}</td>
                       <td className="px-4 py-3 text-white/90 max-w-90 truncate" title={f.title}>
@@ -281,6 +302,27 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
+            {findings.length > 0 && (
+              <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between">
+                <p className="text-white/70 text-xs">Page {findingsPage} of {totalPages}</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setFindingsPage((p) => Math.max(1, p - 1))}
+                    disabled={findingsPage <= 1}
+                    className="px-3 py-1 text-xs rounded border border-white/30 text-white disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setFindingsPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={findingsPage >= totalPages}
+                    className="px-3 py-1 text-xs rounded border border-white/30 text-white disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       </main>

@@ -91,6 +91,9 @@ async def build_report(
     critical_count = sum(1 for f in findings if f.severity_label == "critical")
     high_count = sum(1 for f in findings if f.severity_label == "high")
     kev_count = sum(1 for f in findings if f.cisa_kev)
+    risk_values = [f.risk_score for f in findings if f.risk_score is not None]
+    avg_risk = (sum(risk_values) / len(risk_values)) if risk_values else 0.0
+    max_risk = max(risk_values) if risk_values else 0.0
 
     stats = (
         f"Total findings: {len(findings)} | Critical: {critical_count} | "
@@ -146,6 +149,26 @@ async def build_report(
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
     ]))
     story.append(stats_table)
+    story.append(Spacer(1, 6 * mm))
+
+    story.append(Paragraph("Report Metrics", h1_style))
+    report_metrics = [
+        ["Metric", "Value"],
+        ["Average Risk Score", f"{avg_risk:.2f}"],
+        ["Maximum Risk Score", f"{max_risk:.2f}"],
+        ["KEV Ratio", f"{(kev_count / len(findings)) * 100:.1f}%" if findings else "0.0%"],
+        ["Controls with Gaps", str(len(gaps))],
+    ]
+    metrics_table = Table(report_metrics, colWidths=[100 * mm, 50 * mm])
+    metrics_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f2937")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+    ]))
+    story.append(metrics_table)
     story.append(Spacer(1, 6 * mm))
 
     story.append(Paragraph("Compliance Gaps", h1_style))

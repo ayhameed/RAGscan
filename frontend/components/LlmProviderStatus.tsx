@@ -6,7 +6,13 @@ const LLM_PROVIDER_KEY = "ragscan_last_llm_provider";
 
 function labelFor(provider: string): string {
   const val = provider.toLowerCase();
-  if (val.includes("github")) return "Fallback: GitHub Open Model";
+  if (val.includes("github")) {
+    const parts = provider.split(":");
+    if (parts.length > 1 && parts[1].trim()) {
+      return `Fallback: ${parts[1].trim()}`;
+    }
+    return "Fallback: GitHub Open Model";
+  }
   if (val.includes("anthropic")) return "Primary: Anthropic";
   if (val) return `Provider: ${provider}`;
   return "Provider: awaiting first LLM response";

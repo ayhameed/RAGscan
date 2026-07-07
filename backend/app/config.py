@@ -45,6 +45,12 @@ class Settings(BaseSettings):
         if not isinstance(value, str):
             return value
 
+        if value.startswith("ppostgres://"):
+            value = value.replace("ppostgres://", "postgresql+asyncpg://", 1)
+
+        if value.startswith("ppostgresql://"):
+            value = value.replace("ppostgresql://", "postgresql+asyncpg://", 1)
+
         if value.startswith("postgres://"):
             value = value.replace("postgres://", "postgresql+asyncpg://", 1)
 

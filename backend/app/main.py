@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -79,4 +80,13 @@ app.include_router(audit.router, prefix="/audit")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": app.version}
+    # Touch the database so a single keep-alive ping keeps both the Render web
+    # service awake and the Neon compute from auto-suspending on idle.
+    db_ok = False
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        log.exception("Health check DB ping failed")
+    return {"status": "ok", "version": app.version, "db": db_ok}
